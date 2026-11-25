@@ -256,3 +256,104 @@ def simulate_and_plot(
     sim = simulate(model, sweep, values=values, family=family, candidate=candidate)
     plot_simulation(sim, path=path, data=data, logx=logx, logy=logy)
     return sim
+
+
+def plot_mms_convergence(
+    report,
+    path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+) -> Optional[Path]:
+    """Plot log-log spatial L2 & Linf error convergence from `mms_study` vs. formal slope."""
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(7.0, 4.6))
+    h = report.spacings
+    for f in report.fields:
+        ax.loglog(h, report.errors_l2[f], "o-", lw=2, label=f"{f} L2 (p={report.order_l2[f]:.2f})")
+        ax.loglog(h, report.errors_linf[f], "s--", lw=1.3, alpha=0.8, label=f"{f} L∞ (p={report.order_linf[f]:.2f})")
+    ref = report.errors_l2[report.fields[0]][0] * (h / h[0]) ** report.formal_order
+    ax.loglog(h, ref, "k:", lw=1.5, label=f"Reference O(h^{report.formal_order:g})")
+    ax.set_xlabel("Grid spacing h")
+    ax.set_ylabel("Discretisation error")
+    ax.set_title(f"MMS Spatial Convergence (formal order = {report.formal_order:g})")
+    ax.grid(True, which="both", alpha=0.3)
+    ax.legend(frameon=False, fontsize=8)
+    return _finish(fig, path, show)
+
+
+def plot_gci_study(
+    report,
+    path: Optional[Union[str, Path]] = None,
+    qoi_label: str = "Quantity of Interest",
+    show: bool = False,
+) -> Optional[Path]:
+    """Plot coarse/medium/fine QoI values, Richardson extrapolation, and +-GCI_fine band."""
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(7.0, 4.4))
+    hs = np.array(report.spacings, dtype=float)
+    phis = np.array(report.values, dtype=float)
+    ax.plot(hs, phis, "o-", lw=2, color="tab:blue", label="Mesh / step evaluations")
+    ax.axhline(report.extrapolated_value, color="tab:green", ls="--", lw=1.6,
+               label=f"Richardson φ_ext = {report.extrapolated_value:.6g} (p={report.observed_order:.2f})")
+    band = abs(report.values[0]) * report.gci_fine_21
+    ax.axhspan(report.values[0] - band, report.values[0] + band, color="tab:green", alpha=0.15,
+               label=f"±GCI_fine ({report.gci_fine_21 * 100:.3f}%)")
+    ax.set_xlabel("Discretisation size h (or dt)")
+    ax.set_ylabel(qoi_label)
+    ax.set_title(f"Grid / Step Independence [{report.regime}]")
+    ax.grid(alpha=0.3)
+    ax.legend(frameon=False, fontsize=8)
+    return _finish(fig, path, show)
+
+
+def plot_conservation_audit(
+    audit_report,
+    path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+) -> Optional[Path]:
+    """Plot discrete conservation residual histories R(t) across audited quantities."""
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    for nm, entry in audit_report.entries.items():
+        ax.plot(audit_report.t, entry.residual_series, lw=1.8,
+                label=f"{nm} (max|R|={entry.max_abs_residual:.2e})")
+    ax.axhline(0.0, color="black", lw=0.8, ls=":")
+    ax.set_xlabel("t")
+    ax.set_ylabel("Conservation residual R(t)")
+    ax.set_title(f"Conservation Audit [{audit_report.kind}] — Passed: {audit_report.passed}")
+    ax.grid(alpha=0.3)
+    ax.legend(frameon=False, fontsize=8)
+    return _finish(fig, path, show)
+
+
+def plot_stability_spectrum(
+    stiffness_report,
+    dt: float,
+    scheme: str = "rk4",
+    path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+) -> Optional[Path]:
+    """Plot scaled eigenvalues z = dt*lambda against the stability region |R(z)| <= 1 of `scheme`."""
+    from .integrators import stability_function
+
+    plt = _pyplot()
+    z_pts = np.asarray(stiffness_report.eigenvalues, dtype=complex) * float(dt)
+    span_re = max(4.5, float(np.max(np.abs(z_pts.real)) * 1.25) if z_pts.size else 4.5)
+    span_im = max(4.0, float(np.max(np.abs(z_pts.imag)) * 1.25) if z_pts.size else 4.0)
+    xr = np.linspace(-span_re, max(1.5, 0.25 * span_re), 260)
+    yr = np.linspace(-span_im, span_im, 260)
+    X, Y = np.meshgrid(xr, yr)
+    Z = X + 1j * Y
+    mag = np.abs(stability_function(scheme, Z))
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    ax.contourf(X, Y, mag, levels=[0.0, 1.0], colors=["#d9f0e1"], alpha=0.7)
+    ax.contour(X, Y, mag, levels=[1.0], colors=["#1e5631"], linewidths=1.6)
+    ax.axhline(0.0, color="gray", lw=0.7)
+    ax.axvline(0.0, color="gray", lw=0.7)
+    ax.scatter(z_pts.real, z_pts.imag, color="crimson", s=38, zorder=4, label=f"dt·λ (dt={dt:.3g})")
+    ax.set_xlabel("Re(dt · λ)")
+    ax.set_ylabel("Im(dt · λ)")
+    ax.set_title(f"Linear Stability Region [{scheme}] — |R(z)| ≤ 1 shaded")
+    ax.grid(alpha=0.3)
+    ax.legend(frameon=False, fontsize=8)
+    return _finish(fig, path, show)

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
+from .integrators import FixedStepResult, integrate_fixed, max_stable_dt, stability_function
 from .numerical import (
     FitResult,
     HybridODESolution,
@@ -18,16 +19,42 @@ from .numerical import (
     SheddingEventSpec,
     SheddingRecord,
 )
+from .odesys import ODESystem, Trajectory
+from .pde import BC, ConservationLaw1D, PDESolution, cell_average
 from .simulate import (
     SimulationResult,
+    plot_conservation_audit,
+    plot_gci_study,
     plot_hybrid,
+    plot_mms_convergence,
     plot_ranked,
     plot_simulation,
+    plot_stability_spectrum,
     simulate,
     simulate_and_plot,
 )
 from .symbolic import CandidateEquation, DerivationResult, DerivationStep, SymbolicSolver
 from .system import RateIdentity, RelationSpec, System, Variable
+from .verify import (
+    CoSimulationReport,
+    ConservationAuditReport,
+    FieldConservationEntry,
+    GCIReport,
+    MMSReport,
+    PartitionedCouplingReport,
+    StiffnessReport,
+    TimestepReport,
+    analyze_stiffness,
+    audit_hybrid_conservation,
+    audit_ode_invariants,
+    audit_pde_conservation,
+    cosimulate_coupled_odes,
+    gci_from_values,
+    grid_convergence_study,
+    mms_study,
+    solve_partitioned_fixed_point,
+    timestep_study,
+)
 
 
 def formulate(
@@ -67,28 +94,60 @@ def formulate(
 
 
 __all__ = [
+    "BC",
     "CandidateEquation",
+    "CoSimulationReport",
+    "ConservationAuditReport",
+    "ConservationLaw1D",
     "DerivationResult",
     "DerivationStep",
     "Dimension",
     "DimensionalEngine",
     "DimensionalSolution",
+    "FieldConservationEntry",
     "FitResult",
+    "FixedStepResult",
+    "GCIReport",
     "HybridODESolution",
+    "MMSReport",
     "NumericalSolver",
     "ODESolution",
+    "ODESystem",
+    "PDESolution",
+    "PartitionedCouplingReport",
     "RateIdentity",
     "RelationSpec",
     "SheddingEventSpec",
     "SheddingRecord",
     "SimulationResult",
+    "StiffnessReport",
     "SymbolicSolver",
     "System",
+    "TimestepReport",
+    "Trajectory",
     "Variable",
+    "analyze_stiffness",
+    "audit_hybrid_conservation",
+    "audit_ode_invariants",
+    "audit_pde_conservation",
+    "cell_average",
+    "cosimulate_coupled_odes",
     "formulate",
+    "gci_from_values",
+    "grid_convergence_study",
+    "integrate_fixed",
+    "max_stable_dt",
+    "mms_study",
+    "plot_conservation_audit",
+    "plot_gci_study",
     "plot_hybrid",
+    "plot_mms_convergence",
     "plot_ranked",
     "plot_simulation",
+    "plot_stability_spectrum",
     "simulate",
     "simulate_and_plot",
+    "solve_partitioned_fixed_point",
+    "stability_function",
+    "timestep_study",
 ]

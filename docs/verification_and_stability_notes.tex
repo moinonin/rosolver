@@ -1,0 +1,193 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.1cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array,tabularx}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\definecolor{navy}{HTML}{1B365D}
+\definecolor{slate}{HTML}{2C5282}
+\definecolor{tint}{HTML}{F4F7FA}
+\definecolor{amber}{HTML}{8A5A00}
+\definecolor{ambertint}{HTML}{FFFBEB}
+\definecolor{greenink}{HTML}{1E5631}
+\definecolor{greentint}{HTML}{F1F8F4}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=slate,
+  urlcolor=slate,
+  pdftitle={Verification, Conservation & Numerical Coupling Stability in rosolver},
+  pdfauthor={rosolver Documentation}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{slate}\textsc{Verification \& Coupling Stability (\texttt{rosolver})}}
+\fancyhead[R]{\small\color{slate}ASME V\&V 20 $\cdot$ MMS $\cdot$ Conservation $\cdot$ Coupling}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newtcolorbox{setupbox}[1]{
+  breakable, enhanced, colback=tint, colframe=navy, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+\newtcolorbox{resultbox}[1]{
+  breakable, enhanced, colback=greentint, colframe=greenink, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+\newtcolorbox{insightbox}[1]{
+  breakable, enhanced, colback=ambertint, colframe=amber, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\pd}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\td}[2]{\frac{\dd #1}{\dd #2}}
+
+\title{
+  {\color{navy}\rule{\textwidth}{1.8pt}}\\[0.6em]
+  {\LARGE\bfseries\color{navy} Generic Numerical Verification \& Coupling Stability}\\[0.3em]
+  {\large\color{slate} Mesh Convergence, Time-Step Sensitivity, Conservation Audits \& Partitioned Co-Simulation in \texttt{rosolver}}\\[0.4em]
+  {\color{navy}\rule{\textwidth}{0.8pt}}
+}
+\author{Companion Reference to \texttt{rosolver.verify}, \texttt{rosolver.pde}, \texttt{rosolver.odesys} \& \texttt{examples.verification\_suite}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Formulating and calibrating mathematical laws is only half of computational science; before predictions can guide engineering or policy decisions, the numerical solver must pass disciplined \textbf{Verification} (\emph{``are we solving the equations right?''}). These notes document the domain-agnostic verification architecture built into \texttt{rosolver} following \textbf{ASME V\&V~20-2009}, Roache~(1998), and Celik et~al.~(2008). Because \texttt{rosolver} holds equations symbolically in SymPy alongside fixed-step Runge--Kutta/implicit integrators and a conservative 1D Finite-Volume PDE solver (\texttt{ConservationLaw1D}), it automates four universal pillars across fluid dynamics, chemical kinetics, epidemiology, mechanics, and multi-physics systems: (1)~Code \& Solution Spatial Mesh Verification (Symbolic MMS + Roache GCI), (2)~Time-Step Sensitivity \& CFL/Fourier Diagnostics, (3)~Symbolic \& Machine-Precision Discrete Conservation Audits, and (4)~Jacobian Stiffness \& Aitken-Stabilized Partitioned Coupling.
+\end{abstract}
+
+\tableofcontents
+\vspace{0.8em}
+\hrule
+\vspace{1em}
+
+% ============================================================================
+\section{Pillar 1: Spatial Mesh Convergence \& Code Verification}
+% ============================================================================
+
+\subsection{Code Verification via Automated Symbolic MMS}
+Consider a general 1D system of $m$ balance laws solved by \texttt{ConservationLaw1D}:
+\begin{equation}
+  \pd{u_k}{t} + \pd{}{x}\!\left[f_k(\mathbf{u}, x, t) - D_k(\mathbf{u}, x, t)\pd{u_k}{x}\right] = S_k(\mathbf{u}, x, t),
+  \qquad k = 1,\dots,m,
+\end{equation}
+discretised with cell-averaged finite volumes, Rusanov (local Lax--Friedrichs) numerical fluxes, MUSCL reconstruction (\texttt{constant}, \texttt{linear}, \texttt{minmod}, \texttt{vanleer}, \texttt{mc}), and 3rd-order ghost-cell boundary conditions.
+
+In the \textbf{Method of Manufactured Solutions (MMS)}, we choose a smooth non-trivial analytical field $\mathbf{u}_{\text{exact}}(x,t)$ and ask SymPy (\texttt{law.manufactured\_source}) to differentiate it symbolically to obtain the exact forcing residual:
+\begin{equation}
+  S_{\text{mms},k}(x,t) = \pd{u_{\text{exact},k}}{t} + \pd{}{x}\!\left[f_k(\mathbf{u}_{\text{exact}}) - D_k(\mathbf{u}_{\text{exact}})\pd{u_{\text{exact},k}}{x}\right] - S_k(\mathbf{u}_{\text{exact}}).
+\end{equation}
+Adding $S_{\text{mms},k}$ turns $\mathbf{u}_{\text{exact}}$ into an exact solution of the modified PDE without requiring a known closed-form green's function. \texttt{mms\_study} solves across a mesh hierarchy $N_1 < N_2 < \dots < N_K$ and verifies that cell-averaged $L_1, L_2, L_\infty$ errors decay at the formal spatial order $p_{\text{formal}}$.
+
+\subsection{Solution Verification via Roache GCI \& Celik Iteration}
+When no analytical solution exists (including external runs from OpenFOAM, ANSYS Fluent, COMSOL, or FEM codes via \texttt{rosolver --gci}), \texttt{gci\_from\_values} evaluates three meshes $h_1 < h_2 < h_3$ with refinement ratios $r_{21} = h_2/h_1$ and $r_{32} = h_3/h_2$. Letting $\varepsilon_{21} = \phi_2 - \phi_1$ and $\varepsilon_{32} = \phi_3 - \phi_2$, the observed order $p$ satisfies Celik et~al.'s fixed-point equation:
+\begin{equation}
+  p = \frac{1}{\ln r_{21}}\left|\ln\!\left|\frac{\varepsilon_{32}}{\varepsilon_{21}}\right| + \ln\!\left(\frac{r_{21}^p - s}{r_{32}^p - s}\right)\right|,
+  \qquad s = \operatorname{sgn}\!\left(\frac{\varepsilon_{32}}{\varepsilon_{21}}\right),
+\end{equation}
+which reduces to $p = \ln|\varepsilon_{32}/\varepsilon_{21}| / \ln r$ when $r_{21} = r_{32} = r$. The Richardson-extrapolated continuum estimate and fine-grid uncertainty ($F_s = 1.25$) are:
+\begin{equation}
+  \phi_{\text{ext}}^{21} = \frac{r_{21}^p \phi_1 - \phi_2}{r_{21}^p - 1},
+  \qquad
+  \mathrm{GCI}_{\text{fine}}^{21} = \frac{F_s\,|\phi_1 - \phi_2|}{|\phi_1|\,(r_{21}^p - 1)},
+  \qquad
+  \alpha_{\text{asym}} = \frac{\mathrm{GCI}_{32}}{r_{21}^p\,\mathrm{GCI}_{21}} \approx 1.
+\end{equation}
+
+\begin{resultbox}{Benchmark 1 — Nonlinear Viscous Burgers PDE ($\partial_t u + \partial_x(u^2/2 - \nu\partial_x u)=0$)}
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{MMS Code Verification} ($N \in \{32, 64, 128, 256\}$, $\nu = 0.015$): Observed orders $p_{L_1} = \mathbf{1.990}$, $p_{L_2} = \mathbf{1.992}$, $p_{L_\infty} = \mathbf{2.026}$ vs.\ formal order $2.00$; finest $L_2$ error $= 4.91\times 10^{-6}$ (\textbf{PASS}).
+  \item \textbf{3-Grid Solution GCI} ($N \in \{80, 160, 320\}$, probing steepening wave at $x=0.65$): Monotonic convergence with $p = 1.790$, $\phi_{\text{ext}} = 1.09471$, $\mathrm{GCI}_{\text{fine}} = \mathbf{0.0022\%}$, asymptotic ratio $= \mathbf{1.0000}$ (\textbf{PASS}).
+\end{itemize}
+\end{resultbox}
+
+\begin{center}
+  \includegraphics[width=0.76\textwidth]{../figures/vv_burgers_mms.png}
+\end{center}
+
+% ============================================================================
+\section{Pillar 2: Time-Step Sensitivity \& Dimensionless Stability Numbers}
+% ============================================================================
+
+Adaptive ODE solvers adjust internal step sizes automatically, masking temporal discretisation error if tolerances are loose. \texttt{rosolver.integrators} therefore provides exact fixed-step explicit Runge--Kutta (\texttt{euler}, \texttt{ssprk2}, \texttt{ssprk3}, \texttt{bs3}, \texttt{rk4}, \texttt{dopri5}) and implicit one-step (\texttt{beuler}, \texttt{cn}) integrators. \texttt{timestep\_study} sweeps $\Delta t_1 < \Delta t_2 < \Delta t_3$, verifies observed temporal order $p_t$, and reports convective Courant and diffusive Fourier numbers:
+\begin{equation}
+  \mathrm{CFL} = \frac{|a|_{\max}\,\Delta t}{\Delta x},
+  \qquad
+  \mathrm{Fo} = \frac{D_{\max}\,\Delta t}{\Delta x^2}.
+\end{equation}
+On the nonlinear SEIR epidemic benchmark ($\Delta t \in \{0.25, 0.5, 1.0\}\text{ days}$ under classical \texttt{rk4}), \texttt{timestep\_study} measures $p_t = \mathbf{3.876}$, $\mathrm{GCI}_{\text{fine}} < 10^{-4}\%$, and extrapolated peak infectious count $I(60) = 1805.9824$ (\textbf{PASS}).
+
+% ============================================================================
+\section{Pillar 3: Two-Level Conservation Audits}
+% ============================================================================
+
+\texttt{rosolver} separates \emph{symbolic model conservation} from \emph{discrete numerical conservation}:
+\begin{enumerate}[leftmargin=1.5em,itemsep=3pt]
+  \item \textbf{Model-Level Symbolic Invariants (\texttt{ODESystem.check\_invariant})}: Given any candidate invariant $I(t, \mathbf{y})$ (total mass, population, atom count, mechanical energy, charge), SymPy evaluates the Lie/total derivative along trajectories:
+  \begin{equation}
+    \td{I}{t} = \pd{I}{t} + \sum_{i=1}^m \pd{I}{y_i} f_i(t, \mathbf{y}) \stackrel{?}{=} 0.
+  \end{equation}
+  \texttt{audit\_ode\_invariants} combines this symbolic proof with the numerical drift $\max_t |I(t) - I(0)|$—catching, for instance, Forward Euler's artificial energy injection on a Hamiltonian oscillator while confirming Crank--Nicolson's machine-precision quadratic invariant preservation ($|R| < 10^{-14}$).
+  \item \textbf{Discrete Finite-Volume Flux \& Source Ledger (\texttt{audit\_pde\_conservation})}: \texttt{ConservationLaw1D} appends cumulative left inflow, right outflow, and domain-integrated sources to the state vector and integrates them through the \emph{identical} Runge--Kutta stages:
+  \begin{equation}
+    R_k(t) = \Bigl(\mathcal{M}_k(t) - \mathcal{M}_k(0)\Bigr) - \left(\int_0^t F_{k, -1/2}(\tau)\,\dd\tau - \int_0^t F_{k, N-1/2}(\tau)\,\dd\tau + \int_0^t \sum_{i=0}^{N-1} h\,S_{k,i}(\tau)\,\dd\tau\right).
+  \end{equation}
+  \item \textbf{Hybrid Jump/Event Ledger (\texttt{audit\_hybrid\_conservation})}: Audits conservation across discontinuous threshold resets by summing retained state plus cumulative event removals against integrated production.
+\end{enumerate}
+
+\begin{resultbox}{Benchmark 2 — Coupled 2-Species Reactive Plume Conservation Audit}
+On a 100-cell advection--diffusion--reaction plume ($\partial_t C_A + \partial_x(u C_A - D_A\partial_x C_A) = -k C_A C_B$, $\partial_t C_B + \partial_x(u C_B - D_B\partial_x C_B) = +k C_A C_B$) with oscillatory Dirichlet inflow $C_A(0,t) = 1 + 0.3\sin(2t)$ and open outflow at $x=5$:
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item Species $C_A$: $\max_t |R_A(t)| = \mathbf{2.22\times 10^{-15}}$ (relative residual $1.22\times 10^{-15}$, \textbf{PASS}).
+  \item Species $C_B$: $\max_t |R_B(t)| = \mathbf{1.39\times 10^{-15}}$ (relative residual $4.59\times 10^{-16}$, \textbf{PASS}).
+\end{itemize}
+\end{resultbox}
+
+\begin{center}
+  \includegraphics[width=0.76\textwidth]{../figures/vv_plume_conservation.png}
+\end{center}
+
+% ============================================================================
+\section{Pillar 4: Stiffness \& Partitioned Multi-Physics Coupling Stability}
+% ============================================================================
+
+\subsection{Symbolic/Semi-Discrete Spectrum \& Exact Explicit Step Limits}
+For any \texttt{ODESystem} or semi-discrete FVM operator (\texttt{law.semidiscrete}), \texttt{analyze\_stiffness} computes the Jacobian eigenvalues $\{\lambda_i\}$, stiffness ratio $\mathcal{S} = \max|\operatorname{Re}\lambda_i| / \min_{\operatorname{Re}\lambda_i \ne 0}|\operatorname{Re}\lambda_i|$, and solves $|R_{\text{scheme}}(\Delta t\,\lambda_i)| \le 1$ by bisection using each Runge--Kutta Butcher tableau's exact stability polynomial $R(z) = 1 + z\,\mathbf{b}^T(\mathbf{I} - z\mathbf{A})^{-1}\mathbf{1}$ to report exact $\Delta t_{\max}$ per scheme.
+
+\begin{center}
+  \includegraphics[width=0.68\textwidth]{../figures/vv_stability_spectrum.png}
+\end{center}
+
+\subsection{Partitioned Interface Stabilization (Aitken $\Delta^2$) \& Co-Simulation}
+When two physics modules $\mathcal{A}$ and $\mathcal{B}$ are coupled in partitioned Gauss--Seidel fashion ($\mathbf{u}^{(k+1)} = \mathbf{G}(\mathbf{u}^{(k)})$), strong two-way feedback (e.g., fluid--structure added mass, stiff conjugate heat transfer, or tightly coupled supply--demand) often gives spectral radius $\rho(\partial\mathbf{G}/\partial\mathbf{u}) > 1$, causing unrelaxed Picard iteration to diverge violently.
+
+\texttt{solve\_partitioned\_fixed\_point} monitors the empirical contraction factor $\rho_k = \|\mathbf{r}_k\|_\infty / \|\mathbf{r}_{k-1}\|_\infty$ ($\mathbf{r}_k = \tilde{\mathbf{u}}_k - \mathbf{u}_k$) and applies \textbf{Aitken $\Delta^2$ dynamic relaxation}:
+\begin{equation}
+  \omega_k = -\omega_{k-1}\,\frac{\mathbf{r}_{k-1}^T(\mathbf{r}_k - \mathbf{r}_{k-1})}{\|\mathbf{r}_k - \mathbf{r}_{k-1}\|_2^2},
+  \qquad
+  \mathbf{u}_{k+1} = \mathbf{u}_k + \omega_k\,\mathbf{r}_k.
+\end{equation}
+
+\begin{resultbox}{Benchmark 4 — Divergent Interface Stabilization \& Loose vs.\ Strong Co-Simulation}
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Algebraic Interface ($\rho = 1.52 > 1$)}: Unrelaxed Picard blows up to $\|\mathbf{r}\|_\infty = 1.54\times 10^4$ in 20 iterations (\textbf{FAIL}). Aitken $\Delta^2$ adapts $\omega_k \approx 0.40$, collapsing contraction to $\rho = \mathbf{0.053}$ and converging to $\|\mathbf{r}\|_\infty = \mathbf{7.53\times 10^{-12}}$ in \textbf{11 iterations} (\textbf{PASS}).
+  \item \textbf{Dynamic Co-Simulation ($\Delta T_{\text{macro}} = 0.1$)}: Coupled two-module ODE co-simulation (\texttt{cosimulate\_coupled\_odes}) reduces splitting error against the exact monolithic system from $3.90\times 10^{-2}$ (\texttt{loose} 1-pass staggered) to $\mathbf{2.51\times 10^{-3}}$ (\texttt{strong} Aitken-iterated, $3$ sub-iterations/step — a $\mathbf{15.5\times}$ error reduction with $O(\Delta T_{\text{macro}}^2)$ convergence).
+\end{itemize}
+\end{resultbox}
+
+\end{document}

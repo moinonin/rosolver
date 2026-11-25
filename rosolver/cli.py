@@ -35,7 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--rel",
         action="append",
         default=[],
-        required=True,
         help="Qualitative dependency relation, e.g. 'g = fn(a, b, c)' or 'b = fn(f; grav)'. Repeatable.",
     )
     p.add_argument(
@@ -56,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Rate identity 'target,wrt,equals' meaning d(target)/d(wrt)=equals (e.g. 's,t,v'). Repeatable.",
     )
-    p.add_argument("--target", required=True, help="Target variable to formulate.")
+    p.add_argument("--target", default=None, help="Target variable to formulate.")
     p.add_argument("--wrt", default=None, help="Independent variable to express target with respect to.")
     p.add_argument("--zero-initials", action="store_true", help="Omit integration baseline offsets (x_0 = 0).")
     p.add_argument("--unit-constants", action="store_true", help="Set dimensionless scaling constants kappa = 1.")
@@ -71,6 +70,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--candidate", default=None, help="Candidate name to simulate (default: primary).")
     p.add_argument("--plot", default=None, help="Output image path (png/pdf/svg) for the simulation plot.")
     p.add_argument("--sim-csv", default=None, help="Also write simulated curves to this CSV path.")
+    p.add_argument(
+        "--gci",
+        default=None,
+        help="Standalone ASME V&V 20 GCI check on external solver outputs: 'h1,h2,h3:phi1,phi2,phi3' "
+        "(e.g. '0.01,0.02,0.04:1.957,1.948,1.912').",
+    )
+    p.add_argument("--formal-order", type=float, default=None, help="Optional formal order p for --gci.")
+    p.add_argument("--gci-plot", default=None, help="Optional image path to plot --gci convergence band.")
     return p
 
 
@@ -89,6 +96,26 @@ def _load_csv_columns(path: Path) -> Dict[str, np.ndarray]:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.gci:
+        from .simulate import plot_gci_study
+        from .verify import gci_from_values
+
+        try:
+            h_part, q_part = args.gci.split(":", 1)
+            hs = [float(x) for x in h_part.split(",")]
+            qs = [float(x) for x in q_part.split(",")]
+        except ValueError:
+            parser.error("Expected --gci 'h1,h2,h3:phi1,phi2,phi3'")
+        rep = gci_from_values(hs, qs, formal_order=args.formal_order)
+        print(rep.summary())
+        if args.gci_plot:
+            print("Wrote", plot_gci_study(rep, path=args.gci_plot))
+        if not args.rel:
+            return 0
+
+    if not args.rel or not args.target:
+        parser.error("Provide --rel and --target (or standalone --gci).")
 
     dims: Dict[str, str] = {}
     for item in args.dim:

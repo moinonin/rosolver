@@ -1,20 +1,11 @@
 # `rosolver`
 
-**Symbolic & Numerical Equation Formulator from Qualitative Dependencies and Dimensional Analysis.**
+**Symbolic Equation Discovery, Numerical Calibration & ASME V&V 20 Verification Suite.**
 
-`rosolver` generalizes first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](ch1.tex)) into a domain-agnostic equation discovery engine for students, engineers, and researchers. Even when no governing equation is known, declare qualitative factor dependencies (e.g., $g = \Phi(a, b, c)$ and $b = \psi(f)$) with optional physical or custom domain dimensions, and `rosolver` derives candidate symbolic laws $g(f)$, extracts Buckingham-$\Pi$ dimensionless groups, enforces Clairaut exactness, calibrates constants and exponents from data, and integrates hybrid event-driven ODEs.
+`rosolver` generalizes first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](ch1.tex)) into a domain-agnostic scientific modeling and verification engine for students, engineers, and researchers:
 
----
-
-## Key Capabilities
-
-* **Qualitative Dependency DAGs**: Declare arbitrary multi-hop graphs (`g = fn(a, b, c)`, `b = fn(f; grav)`) with automatic cycle detection, active-path chain-rule pruning, and bottom-up composition.
-* **Exact Rational Dimensional Engine**: Supports SI dimensions (`M, L, T, I, Theta, N, J, rad`), unit aliases (`kg, m, s`), fractional exponents (e.g., fracture toughness `M/(L^(1/2)*T^2)`), and custom non-physics dimensions (`USD`, `Users`, `Month`).
-* **Automated Buckingham-$\Pi$ Discovery**: Extracts coprime integer dimensionless groups from $\ker(D)$ (e.g., Reynolds number $Re$, Stokes number $K$) and generates power-law, affine, and bounded $[0, 1]$ saturating (**Hill** and **Rosin–Rammler**) candidate laws.
-* **Clairaut Exactness & Poincaré Integration**: Automatically couples partial-derivative constants ($\partial \beta_i/\partial x_j = \partial \beta_j/\partial x_i$) and reconstructs closed-form state potentials.
-* **Numerical Calibration & Model Selection**: Exact SVD OLS for parameter-linear laws, analytic-Jacobian Trust-Region NLLS for $\Pi$-exponents, BIC candidate ranking, sparse $\Pi$-subset pruning (`select_sparse_pi`), and local dimensionless elasticities.
-* **Hybrid Event-Driven ODE Solver**: Integrates smooth accretion/growth ODEs coupled with competing discontinuous threshold triggers (e.g., interfacial debonding vs. cohesive bulk fracture in turbomachinery ice shedding).
-* **LaTeX & Pedagogical Traces**: Export step-by-step derivations directly to `.tex` via `result.to_latex()`.
+1. **Symbolic & Numerical Discovery**: Declare qualitative factor dependencies (`g = fn(a, b, c)`, `b = fn(f; grav)`) and optional dimensions; `rosolver` derives closed-form laws $g(f)$, extracts Buckingham-$\Pi$ groups (monomial, affine, saturating Hill, and Rosin–Rammler templates), enforces Clairaut exactness, calibrates constants/exponents via OLS & analytic-Jacobian NLLS, ranks models by BIC, and auto-simulates/plots curves.
+2. **Generic PDE, ODE & Verification Suite (`rosolver.verify`, `rosolver.pde`, `rosolver.odesys`)**: Verify any internal or external numerical model via **Method of Manufactured Solutions (MMS)**, **Roache Grid Convergence Index (GCI)** (including Celik non-uniform refinement iteration), **fixed-step time-step sensitivity**, **symbolic & machine-precision conservation audits**, and **Jacobian stiffness + Aitken $\Delta^2$ partitioned coupling stability checks**.
 
 ---
 
@@ -29,7 +20,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 2. Run Built-In Examples & Tests
+### 2. Run Built-In Suites & Tests
 ```bash
 # Foundational ch1.tex & multi-domain reproductions
 python -m examples.ch1_reproductions
@@ -37,27 +28,25 @@ python -m examples.ch1_reproductions
 # Turbomachinery ice accretion & shedding discovery suite
 python -m examples.icing_turbomachinery
 
-# Run full test suite (26 tests)
-pytest -v
-
 # Auto-simulate final equations and save figures to ./figures
 python -m examples.auto_simulate
+
+# Generic multi-domain V&V showcase (MMS, GCI, FVM conservation, stiffness, Aitken co-sim)
+python -m examples.verification_suite
+
+# Run full test suite (39 tests)
+pytest -v
 ```
 
-### 3. Minimal Python Example (Dimension-Free & Dimensional)
+---
+
+## Core Workflows
+
+### A. Qualitative + Dimensional Equation Formulation & Calibration
 ```python
-from rosolver import formulate, NumericalSolver
+from rosolver import formulate, NumericalSolver, simulate_and_plot
 
-# A) Pure qualitative inference (no dimensions required)
-res_qual = formulate(
-    relations=["g = fn(a, b, c)", "b = fn(f)"],
-    target="g",
-    wrt="f",
-)
-print(res_qual.summary())
-
-# B) Dimensional closure + Clairaut coupling + integration
-res_dim = formulate(
+res = formulate(
     relations=["g = fn(a, b, c)", "b = fn(f; grav)"],
     dims={
         "g": "M*L^2/T^3",
@@ -72,84 +61,88 @@ res_dim = formulate(
     wrt="f",
     zero_initials=True,
 )
-print(res_dim.summary())
-print(res_dim.to_latex())
-```
+print(res.summary())
 
-### 4. Buckingham-$\Pi$ Saturation, Sparse Selection & Numerical Calibration
-```python
-from rosolver import formulate, NumericalSolver
-
-# Discover Stokes number K = tau_p * v_rel / c and bounded collection efficiency
-res = formulate(
-    relations=["m_imp = fn(v_rel; IWC, tau_p, c)"],
-    dims={"m_imp": "M/(L^2*T)", "v_rel": "L/T", "IWC": "M/L^3", "tau_p": "T", "c": "L"},
-    constants=["IWC", "tau_p", "c"],
-    target="m_imp",
-    wrt="v_rel",
-    zero_initials=True,
-    include_saturating=True,
+# Simulate & plot a curve family directly
+simulate_and_plot(
+    res,
+    sweep={"f": (0.5, 25.0, 200)},
+    values={"c": 2.0, "grav": 9.81, "kappa_b": 2**-0.5, "kappa_g": 0.5},
+    family={"a": [1.0, 500.0, 1000.0]},
+    path="figures/waterfall_power.png",
 )
-
-# Rank monomial, power-law, affine, Hill, and Rosin-Rammler candidates by BIC
-ranked = NumericalSolver.rank_candidates(res, data=dataset_dict, criterion="bic")
-print(ranked[0].summary())
 ```
 
-### 5. Hybrid Event-Driven Accretion–Shedding ODEs
+### B. Grid Independence (Roache GCI) & Automated Symbolic MMS
+```python
+from rosolver import ConservationLaw1D, mms_study, grid_convergence_study, gci_from_values
+
+# 1. Standalone GCI on any external CFD / FEM / FVM mesh study (uniform or non-uniform r)
+gci = gci_from_values(spacings=[0.01, 0.02, 0.04], quantities=[1.9572, 1.9480, 1.9112], formal_order=2.0)
+print(gci.summary())
+
+# 2. Automated Method of Manufactured Solutions (SymPy generates exact forcing S_mms)
+burgers = ConservationLaw1D("u", flux="u**2 / 2", diffusivity="nu")
+mms = mms_study(
+    burgers,
+    exact="1.0 + 0.3 * sin(2 * pi * (x - 0.5 * t))",
+    cells=(32, 64, 128, 256),
+    params={"nu": 0.015},
+    reconstruction="linear",
+)
+print(mms.summary())  # Observed L2 order ~ 2.00
+```
+
+### C. Conservation Audits & Time-Step Sensitivity
+```python
+from rosolver import BC, ConservationLaw1D, ODESystem, audit_pde_conservation, audit_ode_invariants, timestep_study
+
+# 1. Machine-precision FVM flux & source ledger audit
+plume = ConservationLaw1D(
+    fields=["C_A", "C_B"],
+    flux={"C_A": "u * C_A", "C_B": "u * C_B"},
+    diffusivity={"C_A": "D_A", "C_B": "D_B"},
+    source={"C_A": "-k * C_A * C_B", "C_B": "k * C_A * C_B"},
+)
+sol = plume.solve((0.0, 5.0), 100, t_end=1.0, initial={"C_A": "0.2", "C_B": "0.5"},
+                  bc={"left": BC.dirichlet({"C_A": "1.0", "C_B": "0.5"}), "right": "outflow"},
+                  params={"u": 1.2, "D_A": 0.04, "D_B": 0.025, "k": 0.8})
+print(audit_pde_conservation(sol).summary())  # max|R| ~ 1e-15
+
+# 2. Symbolic + numerical ODE invariant check & fixed-step dt study
+seir = ODESystem({"S": "-beta*S*I/N", "E": "beta*S*I/N - sigma*E", "I": "sigma*E - gamma*I", "R": "gamma*I"})
+p = {"beta": 0.4, "sigma": 0.2, "gamma": 0.1, "N": 10000.0}
+y0 = {"S": 9950.0, "E": 30.0, "I": 20.0, "R": 0.0}
+traj = seir.solve((0.0, 60.0), y0, params=p, method="rk4", dt=0.25)
+print(audit_ode_invariants(seir, traj, {"total_pop": "S + E + I + R"}, params=p).summary())
+print(timestep_study(seir, dts=(1.0, 0.5, 0.25), t_span=(0.0, 60.0), y0=y0, params=p, scheme="rk4", state="I").summary())
+```
+
+### D. Stiffness Diagnostics, Aitken $\Delta^2$ Stabilization & Co-Simulation
 ```python
 import numpy as np
-import sympy as sp
-from rosolver import NumericalSolver, SheddingEventSpec
+from rosolver import ODESystem, analyze_stiffness, solve_partitioned_fixed_point, cosimulate_coupled_odes
 
-t, delta = sp.symbols("t delta", real=True)
-rate_eq = sp.Eq(sp.Derivative(delta, t), sp.Float(1.0e-4))
+# 1. Stabilize a divergent partitioned two-way interface (|G'| = 1.5 > 1) via Aitken Delta^2
+fp = solve_partitioned_fixed_point(lambda u: np.array([3.0 - 1.5 * u[0]]), [0.0], acceleration="aitken")
+print(fp.summary())
 
-sol = NumericalSolver.integrate_hybrid_ode(
-    rate_eq,
-    wrt="t",
-    span=(0.0, 120.0),
-    y0=0.0,
-    events=[
-        SheddingEventSpec("cohesive_fracture", lambda tv, dv: 2e7 * dv**3 - 1.28, shed_fraction=0.42),
-        SheddingEventSpec("interfacial_adhesive", lambda tv, dv: 2e7 * dv**3 - 30.0 * np.exp(-0.008 * tv), shed_fraction=0.95),
-    ],
-    target_name="delta",
-)
-for ev in sol.events:
-    print(f"t={ev.time:.2f}s | {ev.mode} | {ev.pre_value*1e3:.2f}mm -> {ev.post_value*1e3:.2f}mm")
+# 2. Loose vs. strong Aitken-iterated co-simulation benchmarked against monolithic ODE
+sys_a = ODESystem({"T_f": "-3.0 * (T_f - T_s) + 1.5 * sin(2 * t)"})
+sys_b = ODESystem({"T_s": "1.8 * (T_f - T_s) - 0.4 * T_s"})
+cs = cosimulate_coupled_odes(sys_a, sys_b, (0.0, 4.0), {"T_f": 1.0, "T_s": 0.0}, dt_macro=0.1, mode="strong")
+print(cs.summary())
 ```
 
-### 6. Auto-Simulate & Plot a Final Equation
-```python
-from rosolver import formulate, simulate, plot_simulation
-
-res = formulate(["K = fn(m, v)"], dims={"K": "M*L^2/T^2", "m": "M", "v": "L/T"},
-                target="K", zero_initials=True)
-
-# Sweep one variable, fix the rest, draw a family of curves over another
-sim = simulate(res, sweep={"v": (0, 30, 200)},
-               values={"kappa_K": 0.5},        # calibrated constant
-               family={"m": [1, 5, 10]})
-plot_simulation(sim, path="figures/kinetic_energy.png")   # also: sim.to_csv("curves.csv")
-```
-Also available: `plot_ranked(...)` (fitted candidates vs. data), `plot_hybrid(...)` (accretion/shedding
-sawtooth with event markers), and `simulate_and_plot(...)` as a one-call shortcut. Unspecified free
-constants default to `1.0` (offsets `*_0` to `0`) and are listed in `sim.assumed` and on the plot.
-Pass a `FitResult` (e.g. `NumericalSolver.fit(...)`) as the model to simulate the *calibrated* equation.
-
-Run the demo: `python -m examples.auto_simulate` (writes PNGs to `figures/`).
-
-### 7. Command-Line Interface
+### E. Command-Line Interface
 ```bash
-# Installed console script or module invocation
-rosolver --rel "g = fn(a, b, c)" --rel "b = fn(f)" --target g --wrt f
-python -m rosolver --rel "g = fn(a, b, c)" --rel "b = fn(f)" --target g --wrt f --latex
-
-# Derive, then simulate and plot the final equation in one command
+# Derive, simulate, and plot in one command
 rosolver --rel "K = fn(m, v)" --dim K="M*L^2/T^2" --dim m=M --dim v="L/T" \
   --target K --zero-initials --sweep v=0:30:200 --set kappa_K=0.5 --family m=1,5,10 \
-  --plot figures/kinetic.png --sim-csv figures/kinetic.csv
+  --plot figures/kinetic.png
+
+# Standalone ASME V&V 20 GCI check on external CFD/FEM mesh study numbers
+rosolver --gci "0.01,0.02,0.04:1.9572,1.9480,1.9112" --formal-order 2 --gci-plot figures/gci.png
 ```
 
 ---
@@ -158,24 +151,24 @@ rosolver --rel "K = fn(m, v)" --dim K="M*L^2/T^2" --dim m=M --dim v="L/T" \
 
 ```text
 rosolver/
-├── rosolver/               # Core library package
+├── rosolver/
 │   ├── dimensions.py       # Exact rational dimensional algebra & Buckingham-Pi solver
 │   ├── system.py           # Dependency DAG builder, string DSL, cycle & path checks
 │   ├── symbolic.py         # Chain-rule expansion, Clairaut coupling, symbolic integration
 │   ├── numerical.py        # OLS/NLLS calibration, BIC ranking, sparse Pi, hybrid ODEs
-│   ├── simulate.py         # Auto-simulation sweeps/families & matplotlib plotting
+│   ├── integrators.py      # Fixed-step RK/implicit integrators & stability functions R(z)
+│   ├── odesys.py           # Symbolic multi-state ODE systems, Jacobians & Lie invariants
+│   ├── pde.py              # 1D conservative FVM balance-law solver with flux/source ledger
+│   ├── verify.py           # GCI, MMS, dt sensitivity, conservation audits & Aitken coupling
+│   ├── simulate.py         # Parameter sweeps, curve families & V&V plotting helpers
 │   └── cli.py              # CLI entry point (`rosolver` / `python -m rosolver`)
 ├── examples/
 │   ├── ch1_reproductions.py        # ch1.tex & multi-domain worked derivations
-│   └── icing_turbomachinery.py     # 6 turbomachinery ice accretion & shedding cases
-├── tests/
-│   ├── test_rosolver.py            # Core symbolic, dimensional, numerical & CLI tests
-│   └── test_icing_discovery.py     # Saturating Pi, sparse selection & hybrid ODE tests
-├── docs/
-│   ├── eqform_class_notes.pdf              # Lecture notes on generalized methodology
-│   └── icing_accretion_shedding_notes.pdf  # Turbomachinery icing & shedding notes
-├── ch1.tex                 # Original foundational chapter
-└── pyproject.toml          # Packaging metadata & dependencies
+│   ├── icing_turbomachinery.py     # 6 turbomachinery ice accretion & shedding cases
+│   ├── auto_simulate.py            # Auto-simulation & plotting showcase
+│   └── verification_suite.py       # Generic multi-domain V&V & coupling stability showcase
+├── tests/                  # 39 unit & integration tests
+└── docs/                   # Compiled LaTeX lecture & reference notes (PDF + TeX)
 ```
 
 ## License
