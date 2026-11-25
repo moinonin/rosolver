@@ -37,8 +37,11 @@ python -m examples.ch1_reproductions
 # Turbomachinery ice accretion & shedding discovery suite
 python -m examples.icing_turbomachinery
 
-# Run full test suite (21 tests)
+# Run full test suite (26 tests)
 pytest -v
+
+# Auto-simulate final equations and save figures to ./figures
+python -m examples.auto_simulate
 ```
 
 ### 3. Minimal Python Example (Dimension-Free & Dimensional)
@@ -117,11 +120,36 @@ for ev in sol.events:
     print(f"t={ev.time:.2f}s | {ev.mode} | {ev.pre_value*1e3:.2f}mm -> {ev.post_value*1e3:.2f}mm")
 ```
 
-### 6. Command-Line Interface
+### 6. Auto-Simulate & Plot a Final Equation
+```python
+from rosolver import formulate, simulate, plot_simulation
+
+res = formulate(["K = fn(m, v)"], dims={"K": "M*L^2/T^2", "m": "M", "v": "L/T"},
+                target="K", zero_initials=True)
+
+# Sweep one variable, fix the rest, draw a family of curves over another
+sim = simulate(res, sweep={"v": (0, 30, 200)},
+               values={"kappa_K": 0.5},        # calibrated constant
+               family={"m": [1, 5, 10]})
+plot_simulation(sim, path="figures/kinetic_energy.png")   # also: sim.to_csv("curves.csv")
+```
+Also available: `plot_ranked(...)` (fitted candidates vs. data), `plot_hybrid(...)` (accretion/shedding
+sawtooth with event markers), and `simulate_and_plot(...)` as a one-call shortcut. Unspecified free
+constants default to `1.0` (offsets `*_0` to `0`) and are listed in `sim.assumed` and on the plot.
+Pass a `FitResult` (e.g. `NumericalSolver.fit(...)`) as the model to simulate the *calibrated* equation.
+
+Run the demo: `python -m examples.auto_simulate` (writes PNGs to `figures/`).
+
+### 7. Command-Line Interface
 ```bash
 # Installed console script or module invocation
 rosolver --rel "g = fn(a, b, c)" --rel "b = fn(f)" --target g --wrt f
 python -m rosolver --rel "g = fn(a, b, c)" --rel "b = fn(f)" --target g --wrt f --latex
+
+# Derive, then simulate and plot the final equation in one command
+rosolver --rel "K = fn(m, v)" --dim K="M*L^2/T^2" --dim m=M --dim v="L/T" \
+  --target K --zero-initials --sweep v=0:30:200 --set kappa_K=0.5 --family m=1,5,10 \
+  --plot figures/kinetic.png --sim-csv figures/kinetic.csv
 ```
 
 ---
@@ -135,6 +163,7 @@ rosolver/
 │   ├── system.py           # Dependency DAG builder, string DSL, cycle & path checks
 │   ├── symbolic.py         # Chain-rule expansion, Clairaut coupling, symbolic integration
 │   ├── numerical.py        # OLS/NLLS calibration, BIC ranking, sparse Pi, hybrid ODEs
+│   ├── simulate.py         # Auto-simulation sweeps/families & matplotlib plotting
 │   └── cli.py              # CLI entry point (`rosolver` / `python -m rosolver`)
 ├── examples/
 │   ├── ch1_reproductions.py        # ch1.tex & multi-domain worked derivations

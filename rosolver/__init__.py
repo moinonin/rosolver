@@ -18,6 +18,14 @@ from .numerical import (
     SheddingEventSpec,
     SheddingRecord,
 )
+from .simulate import (
+    SimulationResult,
+    plot_hybrid,
+    plot_ranked,
+    plot_simulation,
+    simulate,
+    simulate_and_plot,
+)
 from .symbolic import CandidateEquation, DerivationResult, DerivationStep, SymbolicSolver
 from .system import RateIdentity, RelationSpec, System, Variable
 
@@ -73,8 +81,14 @@ __all__ = [
     "RelationSpec",
     "SheddingEventSpec",
     "SheddingRecord",
+    "SimulationResult",
     "SymbolicSolver",
     "System",
     "Variable",
     "formulate",
+    "plot_hybrid",
+    "plot_ranked",
+    "plot_simulation",
+    "simulate",
+    "simulate_and_plot",
 ]

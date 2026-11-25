@@ -62,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unit-constants", action="store_true", help="Set dimensionless scaling constants kappa = 1.")
     p.add_argument("--latex", action="store_true", help="Output derivation trace in LaTeX.")
     p.add_argument("--csv", default=None, help="Optional CSV path to fit & rank candidate equations numerically.")
+    p.add_argument("--sweep", default=None,
+                   help="Simulate the final equation over 'var=start:stop:n' (e.g. f=0:25:200).")
+    p.add_argument("--set", dest="set_values", action="append", default=[],
+                   help="Fixed value 'name=value' for simulation (constants, kappas). Repeatable.")
+    p.add_argument("--family", action="append", default=[],
+                   help="Curve family 'name=v1,v2,v3' for simulation. Repeatable.")
+    p.add_argument("--candidate", default=None, help="Candidate name to simulate (default: primary).")
+    p.add_argument("--plot", default=None, help="Output image path (png/pdf/svg) for the simulation plot.")
+    p.add_argument("--sim-csv", default=None, help="Also write simulated curves to this CSV path.")
     return p
 
 
@@ -119,6 +128,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("\n=== Numerical Calibration & BIC Ranking ===")
         for idx, fit_res in enumerate(ranked, 1):
             print(f"{idx}. {fit_res.summary()}")
+
+    if args.sweep:
+        from .simulate import plot_simulation, simulate
+
+        try:
+            var, rng = args.sweep.split("=", 1)
+            lo, hi, n = rng.split(":")
+            sweep = {var.strip(): (float(lo), float(hi), int(n))}
+            values = {k.strip(): float(v) for k, v in (s.split("=", 1) for s in args.set_values)}
+            family = {
+                k.strip(): [float(x) for x in v.split(",")]
+                for k, v in (s.split("=", 1) for s in args.family)
+            }
+        except ValueError:
+            parser.error("Use --sweep var=start:stop:n, --set name=value, --family name=v1,v2")
+        sim = simulate(result, sweep, values=values, family=family, candidate=args.candidate)
+        print(f"\n=== Simulation: {sim.y_name}({sim.x_name}) [{sim.candidate_name}] ===")
+        if sim.assumed:
+            print("Assumed defaults:", ", ".join(f"{k}={v:g}" for k, v in sim.assumed.items()))
+        for label, y in sim.curves.items():
+            print(f"  {label}: min={y.min():.6g}, max={y.max():.6g}, final={y[-1]:.6g}")
+        if args.sim_csv:
+            print("Wrote", sim.to_csv(args.sim_csv))
+        if args.plot:
+            print("Wrote", plot_simulation(sim, path=args.plot))
+    elif args.plot:
+        parser.error("--plot requires --sweep")
 
     return 0
 
