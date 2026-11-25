@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rosolver"
+version = "0.1.0"
+description = "Symbolic and numerical equation formulator from qualitative dependency graphs and dimensional analysis."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Nicolus Rotich" }]
+keywords = [
+    "symbolic-regression",
+    "dimensional-analysis",
+    "buckingham-pi",
+    "chain-rule",
+    "scientific-discovery",
+    "icing",
+    "turbomachinery",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sympy>=1.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+rosolver = "rosolver.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/moinonin/rosolver"
+Repository = "https://github.com/moinonin/rosolver"
+
+[tool.setuptools.packages.find]
+include = ["rosolver*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

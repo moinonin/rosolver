@@ -1,0 +1,369 @@
+
+\chapter{Basic Physics and Mechanics}
+
+\noindent\hspace*{\fill}\rule{\textwidth}{2pt}\vspace*{-\baselineskip}\vspace*{2pt} % 
+\section{Linear and non-linear motion}
+\label{sandv}
+
+\noindent \lettrine{A}ccording to Isaac Newton, objects that do not experience any net external forces will stay at rest or continue moving in a straight line with constant velocity until they are compelled by an external force(s) to act otherwise (Newton's First Law of motion). These manner of motions are widely known as \emph{linear} or \emph{rectilinear}\index{rectilinear} motion. 
+\noindent Supposing you come in contact with an intelligent alien from another planet. This alien understands the dimensions of all our physical units\index{physical units}, but does not know how we conduct our math, for instance, it knows that displacement\index{displacement}, $s$ is a function of velocity, $v$, and velocity is, in turn, a function of time, $t$. Unfortunately, it does not know the exact relationship for estimating the velocity of a moving object within a given time is say, $v = v_0+at$. This is essentially what happens to us when we know for sure the dependent\index{dependent} and independent\index{independent} variables, but we don't have an exact function. So mathematically (as aliens), we would start by representing the given information as follows:
+
+\begin{equation}
+s = f\left( v \right) \text{ and .... }
+v = g(t)
+\label{eqn2.1}
+\end{equation}
+
+\noindent You are allowed for such a system to write the differentials\index{differentials} and take the limits as follows:  
+
+\begin{eqnarray}
+\begin{split}
+\delta s &= \frac{\partial s}{\partial v}\delta v \\
+\text{ Take limits as } &=\delta \rightarrow 0 \text{ such that} \\
+\frac{ds}{dt} & = \frac{\partial s}{\partial v}\frac{dv}{dt}
+\end{split}
+\label{eqn2.101}  
+\end{eqnarray}
+
+\noindent The above statements are consistent with the chain rule\index{chain rule}. Chain rule is attributed to Isaac Newton and Leibniz who first discovered calculus\index{calculus} near the end of 17$^\text{th}$ century. Chain rule is stated: If $y = f(u)$ and $u = g(x)$, then the derivative of the function $y(x)$ is abbreviated in Leibniz notation as:
+
+\begin{equation}
+\frac{dy}{dx} = \frac{\partial y}{\partial u}\frac{du}{dx}
+\label{eqn2.102}
+\end{equation}
+
+\noindent Notice and differentiate the partial derivatives\index{partial derivatives} from the full derivatives in the chain rule statement above. We then proceeds to write the chain rule for this particular case as:
+
+\begin{eqnarray}
+\frac{ds}{dt} = \frac{\partial s}{\partial v}\frac{dv}{dt}
+\label{eqn2.2}
+\end{eqnarray}
+
+\noindent Up to this point we do not really know what Eq.\eqref{eqn2.2} represents, apart from the idea of the trend of variation between $s$ and $v$ provided by the chain rule. So we introduce the concept of dimensional analysis\index{dimensional analysis}. We obviously know the units of $ds/dt$, and $dv/dt$, and luckily in this specific example we also seem to have an idea of the units of $ds/dv$. The LHS of Eq.\eqref{eqn2.2} is nothing but velocity, $v$, while the second component of the RHS is acceleration, denoted $a$, so we rewrite Eq.\eqref{eqn2.2} in dimensional units\index{dimensional units} (length, $L$ and time, $T$), as a linear regression\index{regression} function.
+
+\begin{eqnarray}
+\frac{L}{T} = \beta_0 + \beta_1\left( \frac{L}{T^2}\right) 
+\label{eqn2.3}
+\end{eqnarray}  
+
+\noindent Noticeably, some constants have been introduced in Eq.\eqref{eqn2.3}. This is simply an intuitive way to establish the units in the exact function. The constants $\beta_0$ and $\beta_1$ are linear regression coefficients\index{coefficients}, and most importantly which also represents the \emph{partial derivatives} of the final function, $s\left(v\right)$. 
+
+\noindent The coefficient $\beta_0$ has the same units as $v$, while $\beta_1$ has its units derived by dividing the LHS by non-constant part of the RHS as follows:
+
+\begin{eqnarray}
+\beta_1 \equiv \left( \frac{L}{T}\right) \times\left( \frac{T^2}{L}\right)  \equiv T
+\label{eqn2.4} 
+\end{eqnarray}
+\newpage
+\noindent Now we know the units of all the coefficients and variables and thus we can rewrite Eq.\eqref{eqn2.3} by replacing them as follows: 
+
+\begin{equation}
+v\left(t\right) = v_0 + at
+\label{eqn2.5}
+\end{equation}
+
+\noindent Finally, we reflect on the original question, and remember that our main intention was to find the exact mathematical expression for $s\left(t\right)$. This is done by simply taking the integral\index{integral} of $v\left(t\right)$ \emph{w.r.t} $t$ such that:
+
+\begin{eqnarray}
+\begin{split} 
+s &= \beta_1 \int_{0}^{t}dv \text{ and} \\
+s  &= v_0t +\frac{1}{2}at^2
+\end{split}
+\label{eqn2.6}
+\end{eqnarray}       
+
+\noindent It can, therefore, be seen that as we approach the final stages of this methodology, we close in on some very familiar systems of equations\index{system of equations}. Eq.\eqref{eqn2.5} and Eq.\eqref{eqn2.6} represent some well-established forms of velocity and displacement of an accelerating object in a straight line as a function of time Fig. \ref{fig1.1}. Obviously, the first part of the RHS of Eq.\eqref{eqn2.6} can be replaced so that $v_0t = s_0$, for initial displacement. When there is no change in velocity, acceleration is reduced to \emph{zero}, and the system is referred to as linear motion\index{linear motion}. The case is however different when the change in velocity varies, this is a nonlinear motion\index{nonlinear motion}. 
+
+\begin{figure}[h!]
+	\centering
+	\includegraphics[scale=0.29]{Resources/images/car_velocity.png}
+	\caption{Illustration of linear displacement (with acceleration)}
+	\label{fig1.1}
+\end{figure}
+
+\newpage
+\section{Momentum}
+\label{mom} 
+
+\noindent The momentum\index{momentum} of a body, symbolized as $p$, is defined as the impetus\index{impetus} gained by a moving object. It is quantified as the product of a body's mass, $m$, and it's velocity, $v$. The impetus, therefore, uses derived SI units of kgms$^{-1}$. Having found the instantaneous velocity\index{instantaneous velocity} in section \ref{sandv}, momentum is obtained by multiplying it by the body's mass as per the definition. As of whether the mass is changing or not, that is decided by the moving body itself (physically). 
+\noindent We start by looking at a case in which the mass is changing, for instance when modeling glacier movements from the mountains, earth movements such as landslides, or spacecraft propulsion where the fuel tanks are jettisoned\index{jettisoned} with increasing altitudes, as of rockets. In the former cases, it is difficult to decide if the mass is reducing or increasing or both are happening simultaneously as the mass moves down the incline. I have applied this methodology back when I was conducting my graduate studies on the flow of granular material over the sieves as of mineral processing, agricultural products, pharmaceuticals etc., and it showed promising results \cite{rotich2017}. In the latter case, however, the mass definitely reduces during spacecraft propulsion as the fuel is jettisoned Fig.\ref{fig1.2}. 
+
+\noindent Supposing that we want to model linear momentum from first principles, with the only basis in mind being those developed by the likes of \textbf{John Philoponus}, \textbf{Jean Buridan}, and \textbf{Ren\'e Descartes}. 
+\begin{figure}[h!]
+	\centering
+	\includegraphics[scale=0.35]{Resources/images/spacex.jpg}
+	\caption{SpaceX successfully launches Bangabandhu Satellite-1 from Kennedy Space Center on Friday, May 11 2018}
+	\label{fig1.2}
+\end{figure}
+\noindent These predecessors knew for sure there was a force related to the mass, that contributed to propelling a thrown object. Jean Buridan, for instance, is quoted \emph{``...after leaving the arm of the thrower, the projectile would be moved by an impetus given to it by the thrower and would continue to be moved as long as the impetus remained stronger than the resistance, and would be of infinite duration were it not diminished and corrupted by a contrary force resisting it or by something inclining it to a contrary motion''} - the corrupting force meaning gravity \cite{glick2014}. We have intentionally omitted the effort of Isaac Newton towards the development of momentum function as we want to apply this methodology to derive some additional relationships. 
+
+\noindent This time the alien is told that a property called momentum, $p$ with the units kgms$^{-1}$ is a function of a body's mass, $m$ and its velocity, $v$. Additionally, both $m$ and $v$ changes with time (are functions of time, $t$). So the alien starts searching for the exact function that describes $p$ as a function of $t$.
+
+\begin{equation}
+p = f\left(m,v\right) \text{, but }
+m = g\left(t\right) \text{ and }
+v = h\left(t\right)
+\label{eqn2.7}
+\end{equation}
+
+\noindent The chain rule for the above system is written:
+\begin{eqnarray}
+\frac{dP}{dt} = \frac{\partial P}{\partial m}\frac{dm}{dt} +\frac{\partial P}{\partial v}\frac{dv}{dt}
+\label{eqn2.8}
+\end{eqnarray}
+
+\noindent The next step is to convert the resulting form of the equation into a linear regression model. Let $dp/dt = F$, so that $F$ now has the units of momentum divided by time, i.e., kgms$^{-2}$. Additionally, let $\partial p/\partial m = \beta_1$, similarly $\partial p/\partial v = \beta_2$. In most cases we know the units of the full derivatives for instance, $dm/dt$ yields, kgs$^{-1}$, and $dv/dt$ was shown in section \ref{sandv} to posses acceleration\index{acceleration} units, ms$^{-2}$. The linear regression model for the system is then written using dimensional units as shown below: 
+\begin{equation}
+\frac{ML}{T^2} = \beta_0 + \beta_1\left( \frac{M}{T}\right)  + \beta_2\left( \frac{L}{T^2}\right) 
+\label{eqn2.9}
+\end{equation}  
+
+\noindent We know from arithmetic that the units of each part of the RHS in Eq.\eqref{eqn2.9} must be same as those of the LHS. This is to imply that we can derive the units of the linear regression coefficients such that $\beta_0$ has the same units as the LHS, while $\beta_1$ and $\beta_2$ are found by dividing the units of each of the LHS with those of the RHS. That results in:
+\begin{align*}
+\beta_1 & \equiv \left( \frac{ML}{T^2}\right) \times \left( \frac{T}{M}\right)  \text{ and} \\
+\beta_2 & \equiv \left( \frac{ML}{T^2}\right) \times \left( \frac{T^2}{L}\right) 
+\end{align*}   
+\noindent Evidently, $\beta_1$ has the units of $L/T$, or velocity, $v$, while $\beta_2$ has the units of mass, denoted $m$. Statistically, $\beta_0$ has the same units as the dependent variable, pointing to some mean\index{mean} value of $F$, call it $F_0$. If a particle starts from an initial velocity, $v_0=0$, replacing all these facts in Eq.\eqref{eqn2.9}, we end up with the following form:
+
+\begin{equation}
+F = v\frac{dm}{dt}+ m\frac{dv}{dt}\equiv ma
+\label{eqn2.10}
+\end{equation} 
+\newpage
+\noindent Once more we end up with a more familiar form of the equation. We know today that the rate of change in momentum with time is the \emph{force} associated with that body. Eq.\eqref{eqn2.10} is a statement of Newton's second law of motion when variable mass\index{variable mass} is involved. Many students and some researchers to date still have difficulty interpreting Eq.\eqref{eqn2.10}. There is a very good case and reference for these systems brought forward by Plastino et.\emph{al.} \cite{plastino1992}.
+
+\noindent Obviously the case in Eq.\eqref{eqn2.10} can be made even more simpler and less interesting by removing the variability in the particle mass so that $dm/dt =0$. It can also be simplified further so that the particle moves in a straight line with a constant acceleration, $a$ referred in Eq.\eqref{eqn2.5} - \eqref{eqn2.6}. This results in the following well disambiguated form $F = ma$, which is the mathematical statement of Newton's first law of motion explained earlier in section \ref{sandv}. The exact equation of momentum may also be arrived at with the assumption that $dm =0$, and integrating Eq.\eqref{eqn2.10} to end up with:
+
+\begin{equation}
+p = \int_{0}^{v}mdv
+\label{eqn2.11}
+\end{equation}  
+
+\section{Energy}
+
+\subsection{Kinetic Energy}
+
+\noindent Still on linear and nonlinear motion of the particle described in sections \ref{sandv}, supposing this time you want to quantify the instantaneous\index{instantaneous} energy possessed by the particle. In this case, you will want to know both the position, $s$ and momentum, $p$ of the object in order to estimate the total energy, $E$. Call this function $k=f\left(P,s\right)$, so that by routine, both momentum and position vary with time as earlier shown. So we write the derivative of this energy function as follows:  
+\begin{equation}
+\frac{dk}{dt}= \frac{\partial k}{\partial p}\frac{dp}{dt}+\frac{\partial k}{\partial s}\frac{ds}{dt}
+\label{eqn12}
+\end{equation}
+\noindent Fortunately from the earlier analysis we know both the exact functions and the units of $dp/dt$ and $ds/dt$. We also know the units of energy as joule\index{joule} (pronounced ``djool''). By definition, the joule is the SI unit of work\index{work} or energy\index{energy}, equal to the work done by a force of one newton when its point of application moves one meter in the direction of action of the force, equivalent to one 3600$^{th}$ of a watt-hour. Most importantly, the derived units\index{derived units} of a joule or energy, $E$ in this case is kgm$^{2}$s$^{-2}$. Since we are modeling total Energy on the LHS, we must also suppose that the RHS must constitute portions of both kinetic and potential energies. Hypothetically, we assign the first term on the RHS -- kinetic energy, $K$ and the last term potential energy, $V$. The next following step is to rewrite Eq.\ref{eqn12} as a linear regression model keeping in mind all the dimensions:
+\begin{eqnarray}
+\frac{ML^2}{T^2} = \beta_1\left( \frac{ML}{T^2}\right) +\beta_2\left( \frac{L}{T}\right) 
+\label{eqn2.13}
+\end{eqnarray}
+\noindent Finally we intuitively determine the units of the coefficients by dividing the LHS with each of the RHS parts yielding, $\beta_1$ as the units $L$ or $s$, $\beta_2$ is in $ML/T$ or kgms$^{-1}$ same as momentum, $P$. Let the derivative, $ds/dt$ under the coefficient $\beta_2$ be the speed of propulsion at any given time such that $\left(v = ds/dt\right)$. 
+\begin{eqnarray}
+\begin{split}
+E &= s\frac{dP}{dt} + P\frac{ds}{dt}\\ &\text{ but} \\
+\frac{dP}{dt} &= v\frac{\partial m}{\partial t}+ m\frac{\partial v}{\partial t}
+\end{split}
+\label{eqn2.14} 
+\end{eqnarray}
+\noindent We know that the time rate of momentum equates to force, $F$ as shown in Eq.\eqref{eqn2.10}, which from Newton's first law, $F=ma$. We then bring in $s$ from Eq.\eqref{eqn2.6}, substituting all these in Eq.\eqref{eqn2.14}: 
+\begin{eqnarray}
+\begin{split}
+E &= \frac{1}{2}at^2\left[ v\frac{\partial m}{\partial t}+ m\frac{\partial v}{\partial t}\right] +P\frac{ds}{dt}   \\
+&= -\frac{1}{2}ma^2t^2 + pv\text{, Bring in Eq.\eqref{eqn2.10} and negate}\\
+K& = -\frac{1}{2}mv^2\text{, }V = pv
+\label{eqn2.15}
+\end{split}
+\end{eqnarray}
+\noindent Newtonian kinetic energy as we know is thus a direct result of force, or the changing portion, becoming a weak function of the variable mass in Eq.\eqref{eqn2.14}. The outgoing mathematical analysis therefore leads to the conclusion that for a non variable mass system, $\partial m \simeq 0$, the product of velocity and momentum equals twice the kinetic energy such that $pv = 2K$ in the Newtonian regime. This means that the square brackets term in Eq.\eqref{eqn2.15}, which also equals to the driving force, must always result in a negative value. This explains the disparities arising from transition between Newtonian and relativistic regimes of kinetic energies. The intuitive reasoning here is that the $\partial m/\partial t$ term is never absolutely equal to zero, and these inaccuracies only propagates as the speed nears that of light in a vacuum. Finally, for non-accelerating systems such as subatomic particles, $\partial m\simeq\partial v\simeq0$, Eq.\eqref{eqn2.15} simplifies to $E=pv$, where $E\sim K$ is the total energy of the system. It can therefore be seen that as the speed approaches that of light in a vacuum, which is constant $c$, the above system results in de Broglie-Compton equation $\lambda = h/mc$, or $\lambda=h/p$. The inability to ascertain $\partial m/\partial t$ in Eq.\eqref{eqn2.15} necessitates introduction of Lorentz factor, and thus this could be avoided had the gradual change in mass with time known.      
+\newpage
+\subsection{Wind Energy}
+\label{winen}
+\noindent Wind energy is continually gaining popularity as one of the main renewable energy sources and as such, it would be unjust to omit in this edition. In wind energy converters\index{energy converters} or wind turbines\index{wind turbines} Fig.\ref{fig1.3}, the dynamic pressure\index{dynamic pressure} of wind is first converted to kinetic energy, then mechanical, before finally converting it to electrical power. The long chain explains why wind conversion is a limited form of energy. The outstanding advantage is of course, wind is free. The mathematical principle of this limitation is centered around a \emph{theorem} developed in 1919 by the German physicist Albert Betz, hence also referred to as Betz theorem\index{Betz theorem} \cite{betz1920}.
+
+\begin{figure}[h!]
+	\centering
+	\includegraphics[scale=0.15]{Resources/images/wind_turbine.jpg}
+	\caption{Illustration of a modern three-blade wind turbine}
+	\label{fig1.3}
+\end{figure}
+
+\noindent Even though Betz model has been successful and applicable for a exactly century now, this model is still unclear to many students and researchers as it relies on a constant coefficient of power, $C_P$ that varies from one turbine to another. We have purposed to try and explicate how the functionality arises and the ability to express the mechanical energy as a direct function of the dynamic pressure or air mass, $m$ flowing around the wind turbine blades, and the wind volume, $V$ both as other functions of time. In order to apply the current methodology, we must know that power, $P$ is a time derivative of the mechanical energy\index{mechanical energy}, $P=\partial E/\partial t$, where $E=f(m,V)$. We follow the set of steps as explained earlier, to arrive at the dimensional form below:
+\begin{equation}
+\frac{ML^2}{s^3} =\beta_0+\beta_1\left( \frac{M}{T}\right) +\beta_2\left( \frac{L^3}{T}\right) 
+\label{eqn2.16}
+\end{equation}
+\noindent Proceed to find the dimensions of the coefficients in Eq.\eqref{eqn2.20} through dimensional analysis. The first coefficient $\beta_0$ yields same units as power kgm$^2$s$^{-3}$ or J/s, $\beta_1$ is in m$^2$s$^{-2}$, or $v^2$ while $\beta_2$ gives kgm$^{-1}$s$^{-2}$. Fortunately we know the rest of the units, $dm/dt \equiv \dot{m}$ being (air mass flow\index{mass flow}), and $dV/dt \equiv \dot{V}$ being the volumetric flow\index{volumetric flow} rate.
+
+\noindent We also know that the mass flow rate can be written as a function of the volume flow as $\dot{m}=\rho \dot{V}$, and the volume flow rate $\dot{V}$ is a function of the turbine blades sweep area, $A$ and some averaged wind velocity, $\bar{v}$ such that $\dot{V} = A\bar{v}$. So we may write power equation:    
+\begin{eqnarray}
+\begin{split}
+P &= \beta_0 + \beta_1\dot{m} +\beta_2\dot{V} \\
+& = \dot{V} \left(\beta_1\rho +\beta_2\right)\\
+& = A\bar{v}\left(\beta_1\rho +\beta_2\right)\\
+& =\bar{v}A \bar{v}^2\rho \pm \frac{d^2L}{dt^2}
+\end{split}
+\label{eqn2.17}
+\end{eqnarray}
+
+\noindent The rest of the task is to explain how Eq.\eqref{eqn2.17} is arrived at, particularly the introduced variable, $L$ and why the equation does not look like what we already know for wind power systems. In this case, $L$ is the angular momentum\index{angular momentum} of the wind turbine. It is the rotational equivalent of linear momentum, and here it represents the inertia component rather the resistance of the wind turbine to rotate (or to stop rotating thereof) for whatever reasons, ranging from mechanical structure e.g. weight to the electrical components involved in the alternator unit --this is a practical explanation of Newton's first law of motion, also referred to as the law of inertia. The resistance to stop is power generated a little longer even when the wind speed is null, as the turbine goes to the rest position. It, therefore, points to the inefficiency at the start, but positive at the end and thus it is important to know the appropriate sign in the equation. Angular momentum, $L$ is proportional to the angular speed\index{angular speed}, $\omega$ with the constant being moment of inertia\index{moment of inertia}, $I$, and thus we can write $L =I\omega$.  
+
+\noindent Secondly, the average velocity $\bar{v}$ is made up of two components, the velocity of wind, $v$ and the boundary layer velocity, ${\vec{v_c}}\left(F_D\right)$ of wind just after landing on the surface of the wind turbine blade. That introduces the problem of surface friction, referred to as drag force, $F_D$ which minimizes the wind power. The drag force in turn is a surface characteristic for the material in which the turbine is made of, and overall aerodynamic design\index{aerodynamic design} parameters. Wind power is proportional to the root mean cube \index{root mean cube} of wind speed, and thus if we choose to represent the average velocity as an averaged function of the boundary layer velocity, $v_c$ and the wind speed, $v$ we might write: 
+\begin{equation}
+\bar{v} = \frac{v -{\vec{v_c}}\left(F_D,\theta\right)}{\sqrt[\leftroot{-2}\uproot{2}3]{2}}
+\label{eqn2.18}
+\end{equation}
+\noindent Take note of the negative in $\vec{v_c}$ even though it is an averaged function. Drag force purposes to lessen the total power. We can therefore corroborate all the above facts with the aim of finding an estimate power function for wind turbines.
+\begin{equation}
+P =\rho A\left[ \frac{v -{\vec{v_c}}\left(F_D,\theta\right)}{\sqrt[\leftroot{-2}\uproot{2}3]{2}}\right]^3\pm I\frac{d^2\omega}{dt^2} 
+\label{eqn2.19}
+\end{equation}
+\noindent Aerodynamics is an active research field today aiming at reducing the effect of drag force, $F_D$ on boundary layer\index{boundary layer} velocity. The boundary layer velocity, $\vec{v_c}$ is naturally small for smooth surfaces and is directly proportional to $F_D$ and the angle of attack\index{angle of attack}, $\theta$. This value is required to be as low as possible in modern wind turbine wings, as it determines the amount of lift force generated by the wind turbine blade. 
+
+\noindent Betz's model not only generously assign $v_c=0$, but also assumes a zero \emph{jerk}, $d^2\omega/dt^2=0$. It therefore ended up lumping up all the other factors into a constant he referred to as the coefficient of power\index{coefficient of power}, $C_P$. This presumably  simplifies the Eq.\eqref{eqn2.19} to what we know today as the wind power equation stated:
+\begin{equation} 
+P = \frac{1}{2}C_PAv^3\rho
+\label{eqn2.20}
+\end{equation}  
+\noindent If we want to be more enthusiastic we can continue theorizing $v_c$ to try to narrow down it's effects using the dependencies we know. For instance, you may want to hypothesize that $v_c$ reduces the momentum of air that would have gone to rotating the wind turbine depending on the angle of attack on the blade surfaces. The reduction in angular momentum\index{angular momentum}, $\bigtriangleup L = L$ and the angle of attack $\theta$ further results in a reduction in angular displacement (or effective radius), of the wind turbine blade. Assuming that the angle of attack is rotational (following the blades movement), and consequently drag force, you would then be able to relate all these through the following expressions for $s =f\left(L,\theta \right)$ :
+\begin{eqnarray}
+\begin{split}
+\frac{ds}{dt} &= \frac{\partial s}{\partial L}\frac{dL}{dt}+\frac{\partial s}{\partial \theta}\frac{d\theta}{dt}\\
+&\text{ and }\\
+\frac{L}{T} &= \beta_1 \left( \frac{ML^2}{T^2}\right) +\beta_2 \left( \frac{rad}{T}\right) 
+\label{eqn2.21}
+\end{split}
+\end{eqnarray}     
+\noindent Coefficients $\beta_1$ belongs to the class of units $kg^{-1}m{-1}s$ or inverse linear momentum, while $\beta_2$ has m/rad or representing the thickness of boundary layer over the wind turbine blade $\delta/\theta$. In this case it is also important to note that the rate of reduction in angular momentum, $dL/dt$ is simply the energy loss through drag force or friction, $F_D$ and similarly we know $d\theta/dt$ being the angular velocity, $\omega$. Finally with the notion that $ds/dt = v_c$, we can then replace these components back in Eq.\eqref{eqn2.21} as shown:
+\begin{equation}
+v_c = \frac{1}{p}\left(\frac{dL}{dt} \right)  - \omega \delta \left(Re\right) 
+\label{eqn2.22}
+\end{equation}
+\noindent Where $\delta\left(Re\right)$ is the linear depth around the curvature in which the fluid (air) travels upon deflection - this is the surface minimized by selecting optimal angles of attack. The deflected air mass should not spend more time while in contact with the surface of the blade, otherwise it will create wake\index{wake} causing turbulence\index{turbulence} and thus more drag effect\index{drag effect}. This distance is determined through boundary layer mathematical techniques. 
+
+\noindent The idea is to rush a large mass flow of air through a small surface and thus a thin boundary layer which is intended to result in minimal values of $v_c$ and consequently the drag force. Take note of the change in the RHS sign in Eq.\eqref{eqn2.26}. There is another parameter that affects the boundary layer thickness -- Reynold's number\index{Reynold's number} ($Re$). 
+
+\noindent To date all boundary layer thicknesses are estimated using empirical models of Reynold's number. The thickness of the boundary layer $\delta$,  is a function of the Reynolds number for laminar flow as shown in Eq.\eqref{eqn2.23} derived by Heinrich Blasius \cite{blasius1907}.
+\begin{equation}
+\delta \left(Re\right) = \frac{5.0 \times x}{\sqrt{Re}}
+\label{eqn2.23}
+\end{equation} 
+\noindent Where $x$ is some length parameter representing the position along the semi-infinite plate. Intuitively, we can see that by keeping a low Reynolds number Eq.\eqref{eqn2.23}, we get a higher function $\omega$($R_e$) on the RHS of Eq.\eqref{eqn2.22}. In deed, a low Reynolds number corresponds to lower drag coefficients, $C_D$, and thus the force, $F_D$. A larger value of $\omega$($R_e$) will diminish the resulting value, and eventually yield zero in Eq.\eqref{eqn2.22}. We can now put together all the terms that we hypothesized would conform to our wind power energy model by substituting all the derived terms onto the theorem in Eq.\eqref{eqn2.23}.
+\begin{equation} 
+P = \rho A \left\lbrace \frac{v}{\sqrt[\leftroot{-2}\uproot{2}3]{2}} - \frac{1}{\sqrt[\leftroot{-2}\uproot{2}3]{2}}\left[ \frac{1}{p}\frac{dL}{dt}+\omega \left( \frac{5.0 x}{\sqrt{R_e}}\right)  \right]  \right\rbrace^3 \pm I\zeta 
+\label{eqn2.24}
+\end{equation} 
+\noindent The last term introduced in Eq.\eqref{eqn2.24}, $\zeta$ is the angular jerk\index{angular jerk} representing the second derivative of angular velocity, $d^2\omega/dt^2$, with units of rad/s$^{3}$. The quantity jerk in general is the wear and tear caused by continuous shearing or wearing of the manufactured parts, especially when there is a rapid change in acceleration. In this case it purposely serves to bring out the turbine's inefficiency. This scenario might however be different if the mass flow of the fluid is rapidly halted, as it would mean that the inertia is still driving the turbine and thus some power is generated even without the fluid flow. Generally, the first component on the RHS of Eq.\eqref{eqn2.24} (under the curly braces) is the only significant one, and that is why the rest are decimated in Betz theorem Eq.\eqref{eqn2.20}, by lumping them into a single parameter $C_p$ -- the coefficient of power. According to Betz theorem, this parameter has a maximum value of 59.3\%, now known as Betz limit\index{Betz limit} \cite{betz1920}. 
+
+\noindent In recent times, however, there have been claims, including a registered patent citing an over two-fold (2.3 times) efficient bladeless wind turbine generators \cite{lu2011}. If we re-examine Eq.\eqref{eqn2.24}, we desire that $v_c=0$ in order to have high efficiency, either by making $R_e$ as small as possible or driving $dL/dt$ towards zero, both of these are related to the motion of the blades.
+
+\noindent The outgoing analysis might explain the claimed high efficiency of bladeless wind turbine generators -- also referred to as Tesla wind turbines\index{Tesla wind turbines}.
+\begin{figure}[h!]
+	\centering
+	\includegraphics[scale=0.15]{Resources/images/bladeless_turbine.jpg}
+	\caption{Bladeless wind turbine generator [Photo credit: TreeHugger]}
+	\label{fig1.301}
+\end{figure}
+\subsection{Hydro-electric Energy}
+\noindent Hydro-electricity is one of the oldest methods for energy generation, and still plays a crucial role in today's power grid. Similar to the wind energy systems, they are also derived from conservation of momentum and we would naturally want to use its derivation as one of the proofs of the modeling methodology at hand. Power is the time rate\index{time rate} of energy generation or consumption, as a result it is modeled as a function of momentum of the fluid flow domain over the surface of the turbine. Both potential and kinetic energy remains as high as 100\% before contacting the turbine, where loses starts to set in. It therefore holds to remember that it is the power generation itself that is power intensive in a way that efficiency is the power consumed in the process of transfers between energy sources to actual power. Similar to the wind turbine, we will express the power generated, $P=dE/dt$ as a function of the mass flow of the water, $m$ and the angular velocity of the rotating turbine blades, $\omega$ as $E =f\left( m,\omega\right)$, where $m$, and $\omega$ are also functions of time. Starting with chain rule we end up with $P = \beta_1\dot{m}+\beta_2\alpha$, expressed dimensionally as: 
+\begin{equation}
+\frac{ML^2}{T^3} = \beta_1\left( \frac{M}{T}\right) +\beta_2\left( \frac{\text{rad}}{T^2}\right) 
+\label{eqn2.25}
+\end{equation} 
+\noindent Where $\dot{m}$ is the fluid mass flow-rate, and $\alpha$ is the angular acceleration of the turbine. The coefficients $\beta_1$ has the units m$^2$s$^{-2}$, pointing to some acceleration, while $\beta_2$ gives kgm$^2$s$^{-1}$ rad$^{-1}$. Intuitively, we realize that it is the potential energy\index{potential energy} of the fluid mass that starts when water drops from the cliff of a waterfall to the turbine, and thus we immediately know that it is a gravity\index{gravity} function over the falling height. We will then assign the component of potential energy $hg$ to coefficient $\beta_1$, to signify that we will be taking the product of the height, $h$ and gravity acceleration, $g$. Turbine efficiency\index{Turbine inefficiency} starts from the resistance of the turbine blades to rotate, the inertia\index{inertia}. This resistance however reduces with time, and in the end there might be free rotation even when the water flow is cut abruptly as we had seen earlier with the wind turbine, and from Newton's first law. We will therefore be on the look out for such an effect in the dimensional analysis point of view, and as we know the system cannot generate higher energy than it receives from the potential source, we use this as a way to cover for the system loses. 
+\begin{equation}
+P = gh\left( \frac{dm}{dt}\right)  - \beta_2\left(\frac{d\omega}{dt}\ \right)
+\label{eqn2.26}
+\end{equation}    
+\noindent Up until now we still have not figured out yet what to include on the RHS for $\beta_2$. We are clear that angular momentum is involved. But the reduction effect is likely attributed to inertia, rather than angular momentum itself. How about giving a trial to the fact that:
+\begin{eqnarray}
+\begin{split}
+\beta_2  \frac{d\omega}{dt} & = \frac{\partial L}{\partial \theta}\frac{d\omega}{dt} \text{ but }
+L =I\omega\\ \text{ so} \\
+\alpha I \frac{\partial \omega}{\partial \theta} &= I\zeta
+\end{split}
+\label{eqn2.27}
+\end{eqnarray}
+\noindent Where $I$ is the moment of inertia, $\alpha$ is the angular acceleration of the turbine blades, and $\zeta$ is the angular jerk. Finally we put together all the components of the power equation as shown below:
+\begin{eqnarray}
+\begin{split}
+P &= gh\frac{dm}{dt} - I\zeta\text{ ,}
+\frac{dm}{dt} &= \rho Q \\
+&\text{ therefore}\\
+P & = \rho gh Q - I\zeta 
+\end{split}
+\label{eqn2.28}
+\end{eqnarray}
+\noindent Where $Q$ is the volumetric flow rate of the fluid driving the turbine, in this case water.
+\begin{figure}[h!]
+	\centering
+	\includegraphics[scale=0.33]{Resources/images/hydro.jpg}
+	\caption{An illustration of the key components of a hydropower plant}
+	\label{fig1.4}
+\end{figure}
+\noindent It is well established that discontinuities in acceleration, jerk\index{jerk}, denoted $\zeta$ is detrimental to mobile devices, especially in rotating mechanics of rigid bodies\index{rigid bodies}. It, therefore, has to be avoided as it leads to inefficiencies. To avoid jerk, for instance, dual cam devices\index{cam devices} are used instead. They are bulkier and more expensive, but also quieter and more reliable. Dual cams operate on one axis in continuous rotation, and shifts to another axle about a fraction of a full revolution \cite{wikipediajerk}. 
+\begin{equation}
+P = \eta\rho g Q h
+\label{eqn2.29}
+\end{equation}
+\noindent A well known model for hydro-electric generator\index{hydro-electric generator} Fig.\ref{fig1.4} is the Euler equation\index{Euler equation} that lumps efficiency of the power generator as a reducing parameter, $\eta$ Eq.\eqref{eqn2.29}. It might be possible for instance to select several turbines with empirically known efficiencies, $\eta$  and measured $I$, $\zeta$, or wear as $I\zeta$. This would allow for comparison of say Eq.\eqref{eqn2.28} and Eq.\eqref{eqn2.29} to come up with efficiency curves which would then be validated. A combination of the above two equations yields a theoretical efficiency as shown in Eq.\eqref{eqn2.30}:
+\begin{equation}
+\eta = 1 - \frac{I\zeta}{\rho g Q h}
+\label{eqn2.30}
+\end{equation}
+\noindent This implies that a high power generation efficiency is achieved by ensuring a low value of the jerking component $I\zeta$ in Eq.\eqref{eqn2.30}. Poor maintenance, especially lubrication of main bearing shafts in wind turbines and hydroelectric generators creates ``micromovements'' causing fretting that affects the bearing raceways. Frequent lubrication, therefore, allows sufficient separation between the bearing rollers and the raceways by providing a thin film that prevents premature micropiting on the main shaft's surfaces. In the case of wind turbines lubrication protects the turbine from variable shock loads due to frequent variation in wind speeds and directions. All these efforts go to reducing the jerk, the third derivative of position with time.
+\section{Conclusion}
+\noindent We have shown the importance of dimensional analysis in the derivation of models from first principles. Most importantly, a rigorous verification of these methods is necessary, even though most of which need not be done experimentally. in general, the analysis presented provides an intuitive starting point to assess the theoretical validity of the philosophy before commencing any form of experiments in order to minimize costs. The objectives of this chapter were therefore first, to provide an introduction, to the proposed methodology, its applications, and secondly, corroborate the fact that models obtained this way, even though they may slightly differ from the well-established ones, still hold an important place as for being hypothetical, yet common scenarios that we as engineers and scientists find ourselves in, when modeling new scientific phenomena.
+    
+%\newpage
+%\bibliography{sample}
+%\bibliographystyle{plain}
+
+%\begingroup
+%\let\clearpage\relax
+\begin{singlespace}
+\begin{thebibliography}{1}
+	
+	\bibitem{betz1920}
+	Albert Betz.
+	\newblock Theoretical limit for best utilization of wind by wind-motors.
+	\newblock {\em Magazine for the Entire Turbine System}, 20:307--309, 1920.
+	
+	\bibitem{blasius1907}
+	Heinrich Blasius.
+	\newblock {\em Grenzschichten in Fl{\"u}ssigkeiten mit kleiner Reibung}.
+	\newblock Druck von BG Teubner, 1907.
+	
+	\bibitem{wikipediajerk}
+	Wikipedia contributors.
+	\newblock Jerk.
+	\newblock Electronic, March 2018.
+	\newblock [Online; accessed 12-March-2018].
+	
+	\bibitem{glick2014}
+	Thomas~F Glick, Steven Livesey, and Faith Wallis.
+	\newblock {\em Medieval science, technology, and medicine: an encyclopedia}.
+	\newblock Routledge, 2014.
+	
+	\bibitem{lu2011}
+	Weixing Lu and Allan Roberts.
+	\newblock Bladeless wind power generator, November~29 2011.
+	\newblock US Patent 8,067,878.
+	
+	\bibitem{plastino1992}
+	Angel~R Plastino and Juan~C Muzzio.
+	\newblock On the use and abuse of newton's second law for variable mass
+	problems.
+	\newblock {\em Celestial Mechanics and Dynamical Astronomy}, 53(3):227--232,
+	1992.
+	
+	\bibitem{rotich2017}
+	Nicolus Rotich.
+	\newblock {\em Development and application of coupled discrete and continuum
+		models in solid particles classification}.
+	\newblock PhD thesis, Lappeenranta University of Technology, June 2017.
+	
+\end{thebibliography}
+\end{singlespace}
+
+
+
+%\endgroup
+%\clearpage	
+
+   
