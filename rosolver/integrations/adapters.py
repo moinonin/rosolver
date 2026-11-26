@@ -10,12 +10,12 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union
 import numpy as np
 import sympy as sp
 
-from ._parsing import parse_expr, real_symbol
-from .data import Dataset
-from .odesys import Trajectory
-from .pde import PDESolution
-from .results import ResultMixin, StandardResult, VerificationStatus, standardize_result
-from .verify import GCIReport, gci_from_values
+from .._parsing import parse_expr, real_symbol
+from ..data import Dataset
+from ..odesys import Trajectory
+from ..pde import PDESolution
+from ..results import ResultMixin, StandardResult, VerificationStatus, standardize_result
+from ..verify import GCIReport, gci_from_values
 
 
 class SolverAdapter(ABC):

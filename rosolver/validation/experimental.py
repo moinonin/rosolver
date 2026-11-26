@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 
-from .data import Dataset
-from .dimensions import Dimension
-from .results import ResultMixin, VerificationStatus
+from ..data import Dataset
+from ..dimensions import Dimension
+from ..results import ResultMixin, VerificationStatus
 
 
 @dataclass

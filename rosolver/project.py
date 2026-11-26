@@ -89,7 +89,7 @@ def capture_environment() -> Dict[str, Any]:
         if ver is not None:
             deps[pkg] = ver
     return {
-        "rosolver": _pkg_version("rosolver") or "0.1.0",
+        "rosolver": _pkg_version("rosolver") or "0.2.0",
         "python": platform.python_version(),
         "os": f"{platform.system()} {platform.release()}",
         "machine": platform.machine(),

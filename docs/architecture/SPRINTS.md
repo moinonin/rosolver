@@ -2,7 +2,25 @@
 
 **Companion spec:** [`ENG_SPEC.md`](ENG_SPEC.md)  
 **Audit date:** 2026-11-26  
-**Baseline:** Rosolver `v0.1.0` (`68` passing tests, Python `3.11.13`)
+**Baseline:** Rosolver `v0.1.0` (`68` passing tests, Python `3.11.13`)  
+**Current Release Status:** `v0.2.0` (`150` passing tests) — **Sprints 0–7 Completed**; **Sprints 8–9 Deferred (`v0.3+` / `v0.4+`)**
+
+---
+
+## **0. Sprint Completion Status**
+
+| Sprint | Scope | Spec Coverage | Status |
+| --- | --- | --- | --- |
+| **Sprint 0** | Hygiene, CI, Safe AST Expression Parser & API Freeze | `P0.5` | ✅ **Completed** |
+| **Sprint 1** | 5-State `VerificationStatus`, Hardened GCI/Conservation & 6 Benchmarks | `P0.1`–`P0.4` | ✅ **Completed** |
+| **Sprint 2** | Calibration WLS, Identifiability, Diagnostics & `TEMPLATE_REGISTRY` | `P1.3`, `P2.1` | ✅ **Completed** |
+| **Sprint 3** | `StandardResult`, Derived SI Units, `Model` Spec & Event Dispatch | `P1.1`, `P1.2`, `P1.4` | ✅ **Completed** |
+| **Sprint 4** | Persistent `Project` Workspace, SHA-256 Provenance & Ledger Replay | `P1.5` | ✅ **Completed** |
+| **Sprint 5** | `Dataset` I/O, `SolverAdapter`/`VerificationStudy` & `ValidationStudy` | `P2.2`–`P2.4` | ✅ **Completed** |
+| **Sprint 6** | Scientific Reporting Engine, 9-Command Workflow CLI & Jupyter Hooks | `P3.1`, `P3.2` | ✅ **Completed** |
+| **Sprint 7** | Flagship Heat-Transfer Demo, Modular Subpackages, Docs & `v0.2.0` Gate | `P3.3`, `P4.1`–`P4.4` | ✅ **Completed** |
+| **Sprint 8** | PySide6 Desktop App, FiPy/FEniCSx/OpenFOAM Adapters & PDF Export | `P5.1`, `P2.3+` | ⏳ **Deferred (`v0.3+`)** |
+| **Sprint 9** | AI-Assisted Model Formulation & PySR Symbolic Regression Ingestion | `P5.2`, `P5.3` | ⏳ **Deferred (`v0.4+`)** |
 
 ---
 
@@ -104,7 +122,7 @@ flowchart LR
 
 ## **4. Sprint-by-Sprint Implementation Plan (`v0.2`)**
 
-### **Sprint 0 — Hygiene, API Freeze & Security Baseline**
+### **Sprint 0 — Hygiene, API Freeze & Security Baseline — ✅ Completed**
 - **Goal:** Establish a clean, CI-protected baseline and eliminate expression-evaluation risk before any refactoring.
 - **Spec coverage:** `P0.5` (expression security) + repo hygiene blockers.
 - **Deliverables:**
@@ -115,7 +133,7 @@ flowchart LR
   5. Add regression test asserting `rosolver.__all__` public surface stability.
 - **Exit gate:** Clean `git status`, green CI, `>68` tests passing including security parser tests.
 
-### **Sprint 1 — Verification Hardening & Independent Scientific Benchmarks (`P0`)**
+### **Sprint 1 — Verification Hardening & Independent Scientific Benchmarks (`P0`) — ✅ Completed**
 - **Goal:** Make Rosolver's existing V&V and solver diagnostics scientifically unimpeachable.
 - **Spec coverage:** `P0.1`, `P0.2`, `P0.3`, `P0.4`.
 - **Deliverables:**
@@ -127,7 +145,7 @@ flowchart LR
   4. Build `tests/benchmarks/` implementing all **6 required independent benchmarks** (`P0.2`), including Celik et al. (2008) GCI reference check, 1D transient heat conduction vs analytical Fourier series, and `Stefan1D` spatial convergence-order verification.
 - **Exit gate:** All 6 `P0.2` independent benchmarks and hardened V&V edge-case tests pass in CI.
 
-### **Sprint 2 — Calibration Upgrade, Identifiability & Pluggable Templates**
+### **Sprint 2 — Calibration Upgrade, Identifiability & Pluggable Templates — ✅ Completed**
 - **Goal:** Upgrade empirical calibration and decouple candidate equation templates from core solver loops.
 - **Spec coverage:** `P1.3`, `P2.1`.
 - **Deliverables:**
@@ -140,7 +158,7 @@ flowchart LR
      - Distinguish mathematical admissibility, statistical fit (BIC/AIC/RMSE), and physical plausibility in ranking outputs.
 - **Exit gate:** Synthetic parameter recovery benchmark passes with noise, weights, missing values, and collinearity warning assertions.
 
-### **Sprint 3 — Standardized Results, Model Specification & Unified Numerics**
+### **Sprint 3 — Standardized Results, Model Specification & Unified Numerics — ✅ Completed**
 - **Goal:** Introduce the central solver-independent `Model` spec and standardized result structures.
 - **Spec coverage:** `P1.1`, `P1.2`, `P1.4`.
 - **Deliverables:**
@@ -150,7 +168,7 @@ flowchart LR
   4. Add event detection to `ODESystem.solve(...)` and build unified `model.solve(...)` dispatch across ODE, 1D PDE, and `Stefan1D` while keeping all existing solver classes untouched for backwards compatibility (`P1.4`).
 - **Exit gate:** `Model` specs load from YAML, reject cyclic/invalid definitions, solve ODE and 1D heat PDEs via `model.solve()`, and emit standardized result objects.
 
-### **Sprint 4 — Persistent Scientific Project & Execution Ledger**
+### **Sprint 4 — Persistent Scientific Project & Execution Ledger — ✅ Completed**
 - **Goal:** Make complete modelling workflows persistent, hash-verified, and reproducible on disk.
 - **Spec coverage:** `P1.5`.
 - **Deliverables:**
@@ -159,7 +177,7 @@ flowchart LR
   3. Support reopening moved projects cleanly via project-relative paths and explicit errors on missing/modified input hashes.
 - **Exit gate:** Round-trip project save/reload/rerun test reproduces simulation and calibration outputs from stored configuration.
 
-### **Sprint 5 — External Data Import, Solver Adapters & Experimental Validation**
+### **Sprint 5 — External Data Import, Solver Adapters & Experimental Validation — ✅ Completed**
 - **Goal:** Enable Rosolver to ingest external solver outputs and experimental datasets with uncertainty quantification.
 - **Spec coverage:** `P2.2`, `P2.3`, `P2.4`.
 - **Deliverables:**
@@ -168,7 +186,7 @@ flowchart LR
   3. Implement `ValidationStudy` comparing simulation predictions + $u_{\text{num}}$ against multi-point experimental measurements + $u_{\text{exp}}$, producing validation error metrics, 5-state classification, and comparison plots (`P2.4`).
 - **Exit gate:** External CSV mesh-study GCI verification (`Benchmark 6`) and multi-point experimental validation study pass in CI.
 
-### **Sprint 6 — Scientific Reporting Engine & Workflow CLI**
+### **Sprint 6 — Scientific Reporting Engine & Workflow CLI — ✅ Completed**
 - **Goal:** Produce reproducible human/machine-readable scientific reports and expose the full workflow via CLI and Python API.
 - **Spec coverage:** `P3.1`, `P3.2`.
 - **Deliverables:**
@@ -177,7 +195,7 @@ flowchart LR
   3. Add lightweight Jupyter rich-display hooks (`_repr_markdown_`, etc.) with zero IPython runtime dependency (`P3.2`).
 - **Exit gate:** End-to-end CLI subcommand integration tests run headlessly and verify JSON output, exit codes, and generated Markdown reports.
 
-### **Sprint 7 — `v0.2` Flagship Heat-Transfer Demo, Incremental Modularization, Docs & Release**
+### **Sprint 7 — `v0.2` Flagship Heat-Transfer Demo, Incremental Modularization, Docs & Release — ✅ Completed**
 - **Goal:** Ship `v0.2` with one cohesive end-to-end engineering study, clean modular layout, and full scientific documentation.
 - **Spec coverage:** `P3.3`, `P4.1`, `P4.2`, `P4.3`, `P4.4`.
 - **Deliverables:**
@@ -187,9 +205,9 @@ flowchart LR
   4. Bump version to `0.2.0`, configure optional dependency extras in `pyproject.toml`, and verify the `v0.2` release gate checklist (`P4.4`).
 - **Exit gate:** All `P4.4` success metrics met; clean PyPI wheel/sdist build; full CI pass.
 
-### **Post-`v0.2` Deferred Sprints**
-- **Sprint 8 (`v0.3+` — `P5.1`, `P2.3` extended adapters):** PySide6 thin-client desktop application (7 views over public API, non-blocking worker execution) + native FiPy / FEniCSx / OpenFOAM adapters + optional PDF report export.
-- **Sprint 9 (`v0.4+` — `P5.2`, `P5.3`):** Optional AI-assisted draft model formulation and PySR symbolic-regression candidate ingestion gated strictly by deterministic schema, dimensional, and V&V checks.
+### **Post-`v0.2` Deferred Sprints (⏳ Deferred)**
+- **Sprint 8 (`v0.3+` — `P5.1`, `P2.3` extended adapters — ⏳ Deferred):** PySide6 thin-client desktop application (7 views over public API, non-blocking worker execution) + native FiPy / FEniCSx / OpenFOAM adapters + optional PDF report export.
+- **Sprint 9 (`v0.4+` — `P5.2`, `P5.3` — ⏳ Deferred):** Optional AI-assisted draft model formulation and PySR symbolic-regression candidate ingestion gated strictly by deterministic schema, dimensional, and V&V checks.
 
 ---
 

@@ -1,11 +1,10 @@
-# `rosolver`
+# `rosolver` (`v0.2.0`)
 
-**Symbolic Equation Discovery, Numerical Calibration & Verification Suite (Roache GCI / Celik 2008 / MMS).**
+**Reproducible Scientific Modeling, Symbolic Discovery, Calibration, Numerical Simulation & V&V Suite.**
 
-`rosolver` generalizes first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](docs/refs/ch1.tex)) into a domain-agnostic scientific modeling and verification engine for students, engineers, and researchers:
+`rosolver` unifies first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](docs/refs/ch1.tex)), validated solver-independent **`Model`** specifications, SHA-256 hash-verified **`Project`** workspaces with append-only execution ledgers, **OLS/WLS/NLLS calibration** with identifiability diagnostics, **1D FVM PDE / ODE / Stefan solvers**, **Verification & Validation (MMS, Roache/Celik GCI, conservation, experimental validation)**, and **Scientific Markdown/JSON/YAML reporting**.
 
-1. **Symbolic & Numerical Discovery**: Declare qualitative factor dependencies (`g = fn(a, b, c)`, `b = fn(f; grav)`) and optional dimensions; `rosolver` derives closed-form laws $g(f)$, extracts Buckingham-$\Pi$ groups (monomial, affine, saturating Hill, and Rosin–Rammler templates), enforces Clairaut exactness, calibrates constants/exponents via OLS & analytic-Jacobian NLLS, ranks models by BIC, and auto-simulates/plots curves.
-2. **Generic PDE, ODE & Verification Suite (`rosolver.verify`, `rosolver.pde`, `rosolver.odesys`)**: Verify any internal or external numerical model via **Method of Manufactured Solutions (MMS)**, **Roache Grid Convergence Index (GCI)** (including Celik non-uniform refinement iteration), **fixed-step time-step sensitivity**, **symbolic & machine-precision conservation audits**, and **Jacobian stiffness + Aitken $\Delta^2$ partitioned coupling stability checks**. These tools are inspired by ASME V&V 20 principles and do not by themselves constitute formal standards certification.
+See full documentation at [docs/index.md](docs/index.md) and the complete module-by-module guide at [docs/user_guide/procedures.md](docs/user_guide/procedures.md).
 
 ---
 
@@ -20,24 +19,23 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 2. Run Built-In Suites & Tests
+### 2. Run Flagship End-to-End Study (`v0.2.0`) & Test Suites
 ```bash
-# Foundational ch1.tex & multi-domain reproductions
+# End-to-end 1D transient heat conduction lifecycle (model -> solve -> V&V -> report)
+python -m examples.heat_transfer_study.run_study --output outputs/heat_transfer_study
+
+# Workflow CLI subcommands (all support --json and CI exit codes 0/1/2)
+rosolver init my_study --model examples/heat_transfer_study/model.yaml
+rosolver validate my_study
+rosolver simulate my_study --t-end 0.5 --n-cells 64
+rosolver verify my_study --method all --t-end 0.2
+rosolver report my_study --output reports/final_report.md --manifest
+
+# Built-in domain showcases & tests
 python -m examples.ch1_reproductions
-
-# Turbomachinery ice accretion & shedding discovery suite
 python -m examples.icing_turbomachinery
-
-# Auto-simulate final equations and save figures to ./figures
-python -m examples.auto_simulate
-
-# Generic multi-domain V&V showcase (MMS, GCI, FVM conservation, stiffness, Aitken co-sim)
 python -m examples.verification_suite
-
-# Stefan moving-boundary validation + rime/glaze figure
 python -m examples.stefan_validation
-
-# Run full test & benchmark suite
 pytest -v
 ```
 
@@ -137,14 +135,24 @@ cs = cosimulate_coupled_odes(sys_a, sys_b, (0.0, 4.0), {"T_f": 1.0, "T_s": 0.0},
 print(cs.summary())
 ```
 
-### E. Command-Line Interface
+### E. Command-Line Interface (Workflow Subcommands & Legacy Flags)
 ```bash
-# Derive, simulate, and plot in one command
+# Workflow subcommands (all support --json and CI exit codes 0/1/2)
+rosolver init my_study --model examples/heat_transfer_study/model.yaml
+rosolver validate my_study
+rosolver model analyse my_study --target T --wrt t --zero-initials
+rosolver calibrate my_study --data data.csv --uncertainty-col sigma_y
+rosolver simulate my_study --t-end 0.5 --n-cells 64
+rosolver verify my_study --method all --t-end 0.2
+rosolver validate-results my_study --exp-csv exp.csv --field T --u-num 0.01 --u-exp u_T
+rosolver report my_study --output reports/final_report.md --manifest
+rosolver info my_study --json
+
+# Legacy flat flags (preserved 100% for backwards compatibility)
 rosolver --rel "K = fn(m, v)" --dim K="M*L^2/T^2" --dim m=M --dim v="L/T" \
   --target K --zero-initials --sweep v=0:30:200 --set kappa_K=0.5 --family m=1,5,10 \
   --plot figures/kinetic.png
 
-# Standalone Roache/Celik GCI check on external CFD/FEM mesh study numbers
 rosolver --gci "0.01,0.02,0.04:1.9572,1.9480,1.9112" --formal-order 2 --gci-plot figures/gci.png
 ```
 
@@ -211,30 +219,49 @@ See [docs/notes/stefan_front_tracking_notes.pdf](docs/notes/stefan_front_trackin
 
 ---
 
+### G. Persistent Projects, Experimental Validation & Scientific Reporting (`v0.2.0`)
+```python
+from rosolver import Model, Project, ValidationStudy
+
+# 1. Load & validate a declarative Model spec, then run inside a hash-verified Project
+model = Model.from_file("examples/heat_transfer_study/model.yaml")
+proj = Project.create("outputs/heat_demo", name="1D Heat Study")
+proj.add_model(model)
+sim_res = proj.run_simulation(t_span=(0.0, 0.5), n_cells=64, method="cn")
+
+# 2. Generate reproducible Markdown report + JSON manifest
+report = proj.report(output="reports/final_report.md", also_manifest=True)
+print(report.status.value)
+```
+
+See [docs/user_guide/procedures.md](docs/user_guide/procedures.md) for WLS calibration, `Dataset` I/O, external `SolverAdapter` / `VerificationStudy`, `ValidationStudy`, and Jupyter `_repr_markdown_()` hooks.
+
+---
+
 ## Repository Structure
 
 ```text
 rosolver/
 ├── rosolver/
-│   ├── dimensions.py       # Exact rational dimensional algebra & Buckingham-Pi solver
-│   ├── system.py           # Dependency DAG builder, string DSL, cycle & path checks
-│   ├── symbolic.py         # Chain-rule expansion, Clairaut coupling, symbolic integration
-│   ├── numerical.py        # OLS/NLLS calibration, BIC ranking, sparse Pi, hybrid ODEs
-│   ├── integrators.py      # Fixed-step RK/implicit integrators & stability functions R(z)
-│   ├── odesys.py           # Symbolic multi-state ODE systems, Jacobians & Lie invariants
-│   ├── pde.py              # 1D conservative FVM balance-law solver with flux/source ledger
-│   ├── phasechange.py      # Front-fixing Stefan solver: wet/dry, runback film, shedding
-│   ├── verify.py           # GCI, MMS, dt sensitivity, conservation audits & Aitken coupling
-│   ├── simulate.py         # Parameter sweeps, curve families & V&V plotting helpers
-│   └── cli.py              # CLI entry point (`rosolver` / `python -m rosolver`)
+│   ├── core/              # Model, Project, Dimension, System & StandardResult facades
+│   ├── symbolic/          # Chain-rule derivation, Buckingham-Pi & template engine
+│   ├── calibration/       # OLS/WLS/NLLS calibration, identifiability & Dataset facade
+│   ├── numerics/          # 1D FVM PDE, ODESystem, Stefan1D & integrators facades
+│   ├── verification/      # MMS, Roache/Celik GCI, dt, conservation & coupling facades
+│   ├── validation/        # Experimental Model ValidationStudy & uncertainty bands
+│   ├── integrations/      # SolverAdapter, GenericCSVAdapter, SciPyAdapter
+│   ├── io/                # Safe YAML/JSON/CSV/NPZ/HDF5 & SHA-256 project I/O
+│   ├── reporting/         # ScientificReport (Markdown/JSON/YAML) & V&V plots
+│   └── cli.py             # Workflow subcommand CLI + backwards-compatible flat flags
 ├── examples/
+│   ├── heat_transfer_study/        # v0.2 flagship 9-stage 1D heat conduction lifecycle
 │   ├── ch1_reproductions.py        # ch1.tex & multi-domain worked derivations
-│   ├── icing_turbomachinery.py     # 8 turbomachinery ice accretion & shedding cases
-│   ├── stefan_validation.py        # Stefan front vs Neumann + rime/glaze figure
+│   ├── icing_turbomachinery.py     # Turbomachinery ice accretion & shedding cases
 │   ├── auto_simulate.py            # Auto-simulation & plotting showcase
+│   ├── stefan_validation.py        # Stefan front vs Neumann + rime/glaze figure
 │   └── verification_suite.py       # Generic multi-domain V&V & coupling stability showcase
-├── tests/                  # Unit, integration, security & scientific benchmark tests
-└── docs/                   # Architecture specs, LaTeX lecture notes & reference material
+├── tests/                  # Unit, integration, security & independent V&V benchmarks
+└── docs/                   # User procedures, method reference, benchmarks & specs
 ```
 
 ## License

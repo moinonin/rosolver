@@ -20,9 +20,9 @@ from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import sympy as sp
 
-from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
-from .system import RelationSpec, System
-from .templates import TEMPLATE_REGISTRY
+from ..dimensions import Dimension, DimensionalEngine, DimensionalSolution
+from ..system import RelationSpec, System
+from ..templates import TEMPLATE_REGISTRY
 
 
 @dataclass

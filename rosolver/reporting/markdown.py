@@ -20,11 +20,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 
 import yaml
 
-from .results import ResultMixin, StandardResult, VerificationStatus, standardize_result, to_jsonable
+from ..results import ResultMixin, StandardResult, VerificationStatus, standardize_result, to_jsonable
 
 if TYPE_CHECKING:
-    from .model import Model
-    from .project import Project
+    from ..model import Model
+    from ..project import Project
 
 
 REPORT_TYPES: Tuple[str, ...] = (
@@ -495,7 +495,7 @@ class ReportGenerator:
         run_id: Optional[str] = None,
         base_dir: Optional[Path] = None,
     ) -> ScientificReport:
-        from .project import capture_environment
+        from ..project import capture_environment
 
         sr = result if isinstance(result, StandardResult) else standardize_result(result)
         inferred_type = report_type or _KIND_TO_REPORT_TYPE.get(sr.kind, "numerical_simulation")
@@ -615,7 +615,7 @@ class ReportGenerator:
         run_ids: Optional[Sequence[str]] = None,
         figures: Optional[Sequence[Union[str, Path, Mapping[str, str]]]] = None,
     ) -> ScientificReport:
-        from .project import capture_environment
+        from ..project import capture_environment
 
         if report_type not in REPORT_TYPES:
             raise ValueError(

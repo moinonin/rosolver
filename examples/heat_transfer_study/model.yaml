@@ -1,0 +1,71 @@
+model:
+  name: heat_conduction_1d
+  version: "1.0"
+  domain: heat_transfer
+  description: >
+    1D transient heat conduction in a homogeneous slab [0, 1] m with homogeneous
+    Dirichlet boundaries and sinusoidal initial temperature profile T(x, 0) = sin(pi * x).
+variables:
+  independent:
+    - name: x
+      symbol: x
+      unit: m
+      description: Spatial coordinate along slab
+    - name: t
+      symbol: t
+      unit: s
+      description: Elapsed time
+  dependent:
+    - name: T
+      symbol: T
+      unit: K
+      description: Excess temperature above boundary reference
+parameters:
+  - name: alpha
+    symbol: alpha
+    unit: m^2/s
+    status: fixed
+    value: 0.05
+    description: Thermal diffusivity k / (rho * c_p)
+  - name: T0
+    symbol: T0
+    unit: K
+    status: fixed
+    value: 1.0
+    description: Initial peak excess temperature amplitude
+dependencies:
+  - "T = fn(T0, x, t; alpha)"
+equations:
+  - id: heat_pde
+    type: pde
+    expression: "dT/dt = alpha * d2T/dx2"
+    description: 1D Fourier heat conduction equation
+conditions:
+  initial:
+    - kind: initial
+      field: T
+      expression: "T(x,0) = sin(pi * x)"
+  boundary:
+    - kind: dirichlet
+      location: left
+      field: T
+      value: 0.0
+    - kind: dirichlet
+      location: right
+      field: T
+      value: 0.0
+numerics:
+  solver: ConservationLaw1D
+  time_integrator: cn
+  domain: [0.0, 1.0]
+  n_cells: 64
+  reconstruction: linear
+  cfl: 0.4
+  n_out: 50
+  tolerances:
+    rtol: 1.0e-7
+    atol: 1.0e-10
+assumptions:
+  - Homogeneous isotropic medium with constant thermal diffusivity alpha = 0.05 m^2/s.
+  - Zero volumetric heat generation and uniform zero-excess Dirichlet boundaries.
+  - Analytical validation uses exact first-mode Fourier solution T(x, t) = exp(-alpha * pi^2 * t) * sin(pi * x).

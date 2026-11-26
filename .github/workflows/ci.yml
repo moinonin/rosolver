@@ -29,3 +29,6 @@ jobs:
 
       - name: Run test suite
         run: pytest -v
+
+      - name: Run flagship heat-conduction study smoke check
+        run: python -m examples.heat_transfer_study.run_study --output /tmp/rosolver_heat_ci

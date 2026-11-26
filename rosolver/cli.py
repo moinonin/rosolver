@@ -537,14 +537,22 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
                     cells = [int(c.strip()) for c in args.cells.split(",")]
                     fld0 = law.fields[0]
                     rep = grid_convergence_study(
-                        law,
-                        qoi=lambda sol, _f=fld0: float(np.mean(sol.final(_f))),
+                        lambda n: float(
+                            np.mean(
+                                law.solve(
+                                    domain=dom,
+                                    n_cells=n,
+                                    t_end=args.t_end,
+                                    initial=ic if len(law.fields) > 1 else ic[fld0],
+                                    bc=bc,
+                                    params=m.parameter_values(),
+                                    scheme=m.numerics.time_integrator,
+                                    reconstruction=m.numerics.reconstruction,
+                                ).final(fld0)
+                            )
+                        ),
                         cells=cells,
-                        domain=dom,
-                        t_end=args.t_end,
-                        initial=ic if len(law.fields) > 1 else ic[fld0],
-                        bc=bc,
-                        params=m.parameter_values(),
+                        domain_length=float(dom[1] - dom[0]),
                         formal_order=args.formal_order or 2.0,
                     )
                     sr = standardize_result(rep, kind="gci", model_name=m.name, model_version=m.version)
@@ -573,6 +581,7 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
                         t_end=args.t_end,
                         cells=cells,
                         params=m.parameter_values(),
+                        bc_kind="dirichlet" if "sin(pi" in exact_expr else "periodic",
                     )
                     sr = standardize_result(rep, kind="mms", model_name=m.name, model_version=m.version)
                     proj.record_run("mms", sr, model=m, configuration={"cells": cells, "t_end": args.t_end})
