@@ -122,6 +122,20 @@ class DerivationResult:
         blocks = [st.to_latex() for st in self.steps]
         return "\n\n".join(blocks)
 
+    def _repr_markdown_(self) -> str:
+        head = f"### Symbolic Derivation: `{self.target}`" + (
+            f" as fn(`{self.wrt}`)" if self.wrt else ""
+        )
+        lines = [head, "", "| Candidate | Equation | Free Parameters |", "| --- | --- | --- |"]
+        for c in self.candidates:
+            fp = ", ".join(str(p) for p in c.free_params) or "—"
+            lines.append(f"| `{c.name}` | `${sp.latex(c.equation)}$` | `{fp}` |")
+        if self.diagnostics:
+            lines.append("")
+            for d in self.diagnostics:
+                lines.append(f"- **Note:** {d}")
+        return "\n".join(lines)
+
 
 class SymbolicSolver:
     """General symbolic equation formulator over qualitative + dimensional DAGs."""

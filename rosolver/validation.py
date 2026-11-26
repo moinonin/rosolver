@@ -68,6 +68,24 @@ class ValidationReport(ResultMixin):
             lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
+    def _repr_markdown_(self) -> str:
+        lines = [
+            f"### Experimental Validation: `{self.study_name}` (`{self.status.value.upper()}`)",
+            "",
+            f"- **Field:** `{self.field}` ({self.unit}) | **Points:** {len(self.points)} | **Passed:** `{self.passed}`",
+            f"- **RMSE:** {self.rmse:.4e} | **MAE:** {self.mae:.4e} | **Max |E|:** {self.max_abs_error:.4e} | **Mean Bias:** {self.mean_bias:.4e}",
+        ]
+        if self.max_normalized_error is not None and self.fraction_within_uncertainty is not None:
+            lines.append(
+                f"- **Max |E|/u_val:** {self.max_normalized_error:.3f} (k={self.coverage_factor:g}) | "
+                f"**Within Band:** {self.fraction_within_uncertainty * 100:.1f}%"
+            )
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
+        return "\n".join(lines)
+
 
 def _expand_uncertainty(
     val: Union[None, float, Sequence[float], np.ndarray], n: int, name: str

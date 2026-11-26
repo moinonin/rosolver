@@ -52,6 +52,7 @@ from .project import (
     capture_environment,
     sha256_file,
 )
+from .reporting import REPORT_TYPES, ReportGenerator, ScientificReport
 from .results import ResultMetadata, ResultMixin, StandardResult, standardize_result
 from .simulate import (
     SimulationResult,
@@ -180,12 +181,15 @@ __all__ = [
     "Project",
     "ProjectError",
     "ProvenanceMismatchError",
+    "REPORT_TYPES",
     "RateIdentity",
     "RejectedCandidate",
     "RelationSpec",
+    "ReportGenerator",
     "ResultMetadata",
     "ResultMixin",
     "SciPyAdapter",
+    "ScientificReport",
     "SheddingEventSpec",
     "SheddingRecord",
     "SimulationResult",

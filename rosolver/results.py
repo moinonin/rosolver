@@ -25,10 +25,10 @@ class VerificationStatus(str, Enum):
 
 def to_jsonable(obj: Any) -> Any:
     """Recursively convert scientific Python/NumPy/SymPy objects to JSON-compatible primitives."""
-    if obj is None or isinstance(obj, (bool, int, str)):
-        return obj
     if isinstance(obj, Enum):
         return obj.value
+    if obj is None or isinstance(obj, (bool, int, str)):
+        return obj
     if isinstance(obj, float):
         return None if not np.isfinite(obj) else obj
     if isinstance(obj, np.bool_):
@@ -160,6 +160,29 @@ class StandardResult(ResultMixin):
             "metadata": self.metadata.to_dict(),
             "result": raw_dict,
         }
+
+    def _repr_markdown_(self) -> str:
+        lines = [
+            f"### Rosolver `{self.kind}` (`{self.status.value.upper()}`)",
+            "",
+        ]
+        if self.metadata.model_name:
+            lines.append(
+                f"- **Model:** `{self.metadata.model_name}` (v{self.metadata.model_version or 'n/a'})"
+            )
+        if self.metadata.run_id:
+            lines.append(f"- **Run ID:** `{self.metadata.run_id}`")
+        if self.metadata.metrics:
+            lines.extend(["", "| Metric | Value |", "| --- | --- |"])
+            for k, v in self.metadata.metrics.items():
+                lines.append(f"| `{k}` | `{v}` |")
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
+        if hasattr(self.raw, "summary"):
+            lines.extend(["", "```text", self.raw.summary(), "```"])
+        return "\n".join(lines)
 
 
 def _infer_status(raw: Any) -> VerificationStatus:

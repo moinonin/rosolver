@@ -105,6 +105,28 @@ class GCIReport(ResultMixin):
                 lines.append(f"  Note: {n}")
         return "\n".join(lines)
 
+    def _repr_markdown_(self) -> str:
+        h1, h2, h3 = self.spacings
+        p1, p2, p3 = self.values
+        lines = [
+            f"### Grid Convergence Index (GCI) (`{self.status.value.upper()}`)",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Regime | `{self.regime}` |",
+            f"| Spacings `(h1, h2, h3)` | `({h1:.6g}, {h2:.6g}, {h3:.6g})` (`r21={self.r21:.4g}`, `r32={self.r32:.4g}`) |",
+            f"| QoI `(phi1, phi2, phi3)` | `({p1:.8g}, {p2:.8g}, {p3:.8g})` |",
+            f"| Observed order `p` | {self.observed_order:.4f} |",
+            f"| Extrapolated `phi_ext` | {self.extrapolated_value:.8g} |",
+            f"| `GCI_fine (21)` / `GCI_coarse (32)` | {self.gci_fine_21 * 100:.4f}% / {self.gci_coarse_32 * 100:.4f}% |",
+            f"| Asymptotic ratio | {self.asymptotic_ratio:.4f} |",
+        ]
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
+        return "\n".join(lines)
+
 
 def _celik_observed_order(
     e32: float, e21: float, r21: float, r32: float, max_iter: int = 200
@@ -429,6 +451,26 @@ class MMSReport(ResultMixin):
             lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
+    def _repr_markdown_(self) -> str:
+        lines = [
+            f"### MMS Code Verification (`{self.status.value.upper()}` | formal order = {self.formal_order:.2f})",
+            "",
+            f"- **Grids N:** `{self.cells}` | **Passed:** `{self.passed}`",
+            "",
+            "| Field | p_L1 | p_L2 | p_Linf | Finest L2 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for f in self.fields:
+            lines.append(
+                f"| `{f}` | {self.order_l1[f]:.3f} | {self.order_l2[f]:.3f} | "
+                f"{self.order_linf[f]:.3f} | {self.errors_l2[f][-1]:.3e} |"
+            )
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
+        return "\n".join(lines)
+
 
 def _fit_log_slope(h: np.ndarray, err: np.ndarray) -> float:
     mask = err > 1e-15
@@ -714,6 +756,27 @@ class ConservationAuditReport(ResultMixin):
             )
         for w in self.warnings:
             lines.append(f"  Warning: {w}")
+        return "\n".join(lines)
+
+    def _repr_markdown_(self) -> str:
+        scope_tag = f" | Scope: `{self.verification_scope}`" if self.verification_scope else ""
+        lines = [
+            f"### Conservation Audit `[{self.kind}]` (`{self.status.value.upper()}`{scope_tag})",
+            "",
+            f"- **Tolerance:** `{self.tol:.1e}` | **Passed:** `{self.passed}`",
+            "",
+            "| Quantity | Init | Final | max|R| | rel|R| | Status |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for nm, e in self.entries.items():
+            lines.append(
+                f"| `{nm}` | {e.initial_value:.6g} | {e.final_value:.6g} | "
+                f"{e.max_abs_residual:.3e} | {e.max_rel_residual:.3e} | `{'PASS' if e.passed else 'FAIL'}` |"
+            )
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
         return "\n".join(lines)
 
 

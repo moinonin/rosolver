@@ -703,6 +703,56 @@ class Project:
             "integrity_ok": integrity["ok"],
         }
 
+    def report(
+        self,
+        output: Optional[Union[str, Path]] = None,
+        *,
+        title: Optional[str] = None,
+        report_type: str = "integrated_project",
+        run_ids: Optional[Sequence[str]] = None,
+        figures: Optional[Sequence[Union[str, Path, Mapping[str, str]]]] = None,
+        description: str = "",
+        also_manifest: Union[bool, str, Path] = False,
+    ) -> Any:
+        """
+        Generate, save, and register a `ScientificReport` for this project.
+
+        Relative `output` paths are resolved relative to the project root.
+        """
+        from .reporting import ReportGenerator
+
+        rep = ReportGenerator.from_project(
+            self,
+            title=title,
+            report_type=report_type,
+            description=description,
+            run_ids=run_ids,
+            figures=figures,
+        )
+        if output is None:
+            out_path = self.root / "reports" / "final_report.md"
+        else:
+            p = Path(output)
+            out_path = p if p.is_absolute() else (self.root / p)
+
+        rep.save(out_path, also_manifest=also_manifest)
+        try:
+            rel_out = out_path.resolve().relative_to(self.root).as_posix()
+        except ValueError:
+            rel_out = out_path.name
+        reports_list = list(self._manifest.get("reports") or [])
+        reports_list.append(
+            {
+                "path": rel_out,
+                "report_type": rep.report_type,
+                "status": rep.status.value,
+                "generated_at": rep.generated_at,
+            }
+        )
+        self._manifest["reports"] = reports_list
+        self._save_manifest()
+        return rep
+
     def summary(self) -> str:
         inf = self.info()
         return (

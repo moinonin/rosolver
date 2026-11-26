@@ -100,6 +100,25 @@ class FitResult(ResultMixin):
             lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
+    def _repr_markdown_(self) -> str:
+        lines = [
+            f"### Parameter Calibration: `{self.candidate_name}`",
+            "",
+            f"- **R²:** {self.r2:.6f} | **RMSE:** {self.rmse:.6g} | **BIC:** {self.bic:.3f} | **Admissibility:** `{self.admissibility_tier}`",
+            f"- **Calibrated Equation:** `{self.calibrated_equation.lhs} = {self.calibrated_equation.rhs}`",
+            "",
+            "| Parameter | Estimate | Std. Error |",
+            "| --- | --- | --- |",
+        ]
+        for k, v in self.params.items():
+            se = self.std_errors.get(k, float("nan"))
+            lines.append(f"| `{k}` | {v:.6g} | ±{se:.3g} |")
+        if self.warnings:
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- **Warning:** {w}")
+        return "\n".join(lines)
+
 
 @dataclass
 class CandidateRankingReport(ResultMixin):
