@@ -11,6 +11,15 @@ from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
 from .integrators import FixedStepResult, integrate_fixed, max_stable_dt, stability_function
+from .model import (
+    ConditionSpec,
+    EquationSpec,
+    Model,
+    ModelValidationError,
+    NumericsConfig,
+    ParameterSpec,
+    VariableSpec,
+)
 from .numerical import (
     CandidateRankingReport,
     FitResult,
@@ -22,7 +31,7 @@ from .numerical import (
     SheddingEventSpec,
     SheddingRecord,
 )
-from .odesys import ODESystem, Trajectory
+from .odesys import EventSpec, ODESystem, Trajectory
 from .pde import BC, ConservationLaw1D, PDESolution, cell_average
 from .phasechange import (
     HybridStefanSolution,
@@ -31,6 +40,7 @@ from .phasechange import (
     neumann_lambda,
     stefan_shedding_event,
 )
+from .results import ResultMetadata, ResultMixin, StandardResult, standardize_result
 from .simulate import (
     SimulationResult,
     plot_conservation_audit,
@@ -120,6 +130,7 @@ __all__ = [
     "CandidateEquation",
     "CandidateRankingReport",
     "CoSimulationReport",
+    "ConditionSpec",
     "ConservationAuditReport",
     "ConservationLaw1D",
     "DerivationResult",
@@ -127,7 +138,9 @@ __all__ = [
     "Dimension",
     "DimensionalEngine",
     "DimensionalSolution",
+    "EquationSpec",
     "EquationTemplate",
+    "EventSpec",
     "FieldConservationEntry",
     "FitResult",
     "FixedStepResult",
@@ -136,17 +149,24 @@ __all__ = [
     "HybridStefanSolution",
     "IdentifiabilityReport",
     "MMSReport",
+    "Model",
+    "ModelValidationError",
     "NumericalSolver",
+    "NumericsConfig",
     "ODESolution",
     "ODESystem",
     "PDESolution",
+    "ParameterSpec",
     "PartitionedCouplingReport",
     "RateIdentity",
     "RejectedCandidate",
     "RelationSpec",
+    "ResultMetadata",
+    "ResultMixin",
     "SheddingEventSpec",
     "SheddingRecord",
     "SimulationResult",
+    "StandardResult",
     "StiffnessReport",
     "Stefan1D",
     "StefanSolution",
@@ -157,6 +177,7 @@ __all__ = [
     "TimestepReport",
     "Trajectory",
     "Variable",
+    "VariableSpec",
     "VerificationStatus",
     "analyze_stiffness",
     "audit_hybrid_conservation",
@@ -186,6 +207,7 @@ __all__ = [
     "simulate_and_plot",
     "solve_partitioned_fixed_point",
     "stability_function",
+    "standardize_result",
     "stefan_shedding_event",
     "timestep_study",
 ]

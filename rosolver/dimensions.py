@@ -29,6 +29,45 @@ UNIT_TO_DIM: Dict[str, str] = {
     "cd": "J",
 }
 
+# Derived SI units whose names do not collide with canonical dimension symbols (M, L, T, I, Theta, N, J)
+DERIVED_UNIT_TO_DIM: Dict[str, Dict[str, int]] = {
+    "Pa": {"M": 1, "L": -1, "T": -2},
+    "Pascal": {"M": 1, "L": -1, "T": -2},
+    "W": {"M": 1, "L": 2, "T": -3},
+    "Watt": {"M": 1, "L": 2, "T": -3},
+    "Hz": {"T": -1},
+    "Hertz": {"T": -1},
+    "V": {"M": 1, "L": 2, "T": -3, "I": -1},
+    "Volt": {"M": 1, "L": 2, "T": -3, "I": -1},
+    "C": {"I": 1, "T": 1},
+    "Coulomb": {"I": 1, "T": 1},
+    "Ohm": {"M": 1, "L": 2, "T": -3, "I": -2},
+    "Newton": {"M": 1, "L": 1, "T": -2},
+    "Joule": {"M": 1, "L": 2, "T": -2},
+    "degC": {"Theta": 1},
+}
+
+# Physical SI unit symbols (for Model `unit:` fields where N=Newton, J=Joule, T=Tesla, etc.)
+SI_UNIT_TO_DIM: Dict[str, Dict[str, int]] = {
+    **DERIVED_UNIT_TO_DIM,
+    "kg": {"M": 1},
+    "m": {"L": 1},
+    "s": {"T": 1},
+    "sec": {"T": 1},
+    "A": {"I": 1},
+    "K": {"Theta": 1},
+    "mol": {"N": 1},
+    "cd": {"J": 1},
+    "rad": {"rad": 1},
+    "N": {"M": 1, "L": 1, "T": -2},
+    "J": {"M": 1, "L": 2, "T": -2},
+    "T": {"M": 1, "T": -2, "I": -1},
+    "F": {"M": -1, "L": -2, "T": 4, "I": 2},
+    "H": {"M": 1, "L": 2, "T": -2, "I": -2},
+    "S": {"M": -1, "L": -2, "T": 3, "I": 2},
+    "Wb": {"M": 1, "L": 2, "T": -2, "I": -1},
+}
+
 CANONICAL_ORDER: Tuple[str, ...] = ("M", "L", "T", "I", "Theta", "N", "J", "rad")
 
 
@@ -86,10 +125,15 @@ class Dimension:
         return cls(())
 
     @classmethod
-    def parse(cls, spec: Union[str, "Dimension", Mapping[str, Union[int, float, str, sp.Rational]], None]) -> "Dimension":
+    def parse(
+        cls,
+        spec: Union[str, "Dimension", Mapping[str, Union[int, float, str, sp.Rational]], None],
+        *,
+        unit_mode: bool = False,
+    ) -> "Dimension":
         """
-        Parse dimension specifications such as:
-          - "M*L^2/T^3", "kg*m^2/s^3", "L/T^2", "L^(1/2)/T", "1", ""
+        Parse dimension or SI unit specifications such as:
+          - "M*L^2/T^3", "kg*m^2/s^3", "W/(m*K)", "Pa*s", "L^(1/2)/T", "1", ""
           - {"M": 1, "L": 2, "T": -3}
         """
         if spec is None:
@@ -108,11 +152,18 @@ class Dimension:
         # Normalize '**' to '^' for recursive descent parser
         text = text.replace("**", "^")
         tokens = _tokenize_dim(text)
-        parser = _DimParser(tokens)
+        parser = _DimParser(tokens, unit_mode=unit_mode)
         result = parser.parse_expr()
         if parser.pos < len(tokens):
             raise ValueError(f"Unexpected token '{tokens[parser.pos]}' in dimension '{spec}'")
         return result
+
+    @classmethod
+    def from_unit(
+        cls, spec: Union[str, "Dimension", Mapping[str, Union[int, float, str, sp.Rational]], None]
+    ) -> "Dimension":
+        """Parse a physical SI unit string (e.g. 'N/m^2', 'J/(kg*K)', 'W/(m*K)', 'm^2/s')."""
+        return cls.parse(spec, unit_mode=True)
 
     @property
     def is_dimensionless(self) -> bool:
@@ -199,9 +250,10 @@ def _tokenize_dim(text: str) -> List[str]:
 
 
 class _DimParser:
-    def __init__(self, tokens: List[str]) -> None:
+    def __init__(self, tokens: List[str], unit_mode: bool = False) -> None:
         self.tokens = tokens
         self.pos = 0
+        self.unit_mode = unit_mode
 
     def peek(self) -> Optional[str]:
         return self.tokens[self.pos] if self.pos < len(self.tokens) else None
@@ -262,6 +314,10 @@ class _DimParser:
             return Dimension.dimensionless()
         if re.fullmatch(r"[+-]?\d+", ident):
             raise ValueError(f"Unexpected numeric literal '{ident}' as base dimension")
+        if self.unit_mode and ident in SI_UNIT_TO_DIM:
+            return Dimension.from_dict(SI_UNIT_TO_DIM[ident])
+        if ident in DERIVED_UNIT_TO_DIM:
+            return Dimension.from_dict(DERIVED_UNIT_TO_DIM[ident])
         mapped = UNIT_TO_DIM.get(ident, ident)
         return Dimension.from_dict({mapped: 1})
 

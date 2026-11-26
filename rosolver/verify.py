@@ -34,7 +34,6 @@ transfer, chemical kinetics, epidemiology, structural mechanics, population biol
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -52,16 +51,7 @@ from .integrators import (
 from .numerical import HybridODESolution
 from .odesys import ODESystem, Trajectory
 from .pde import BC, ConservationLaw1D, PDESolution, cell_average
-
-
-class VerificationStatus(str, Enum):
-    """Five-state scientific verification classification (P0.1)."""
-
-    PASSED = "Passed"
-    FAILED = "Failed"
-    INCONCLUSIVE = "Inconclusive"
-    NOT_ASSESSED = "NotAssessed"
-    WARNING = "Warning"
+from .results import ResultMixin, VerificationStatus
 
 
 # ============================================================================
@@ -70,7 +60,7 @@ class VerificationStatus(str, Enum):
 
 
 @dataclass
-class GCIReport:
+class GCIReport(ResultMixin):
     """Roache / Celik et al. (2008) three-grid convergence and uncertainty report."""
 
     spacings: Tuple[float, float, float]       # (h1_fine, h2_medium, h3_coarse)
@@ -405,7 +395,7 @@ def grid_convergence_study(
 
 
 @dataclass
-class MMSReport:
+class MMSReport(ResultMixin):
     """Method of Manufactured Solutions (MMS) code-verification report."""
 
     fields: List[str]
@@ -566,7 +556,7 @@ def mms_study(
 
 
 @dataclass
-class TimestepReport:
+class TimestepReport(ResultMixin):
     """Time-step convergence, stability-number, and event-timing sensitivity report."""
 
     dts: Tuple[float, ...]
@@ -698,7 +688,7 @@ class FieldConservationEntry:
 
 
 @dataclass
-class ConservationAuditReport:
+class ConservationAuditReport(ResultMixin):
     kind: str  # "pde_fvm", "ode_invariants", "hybrid_events"
     t: np.ndarray
     entries: Dict[str, FieldConservationEntry]
@@ -903,7 +893,7 @@ def audit_hybrid_conservation(
 
 
 @dataclass
-class StiffnessReport:
+class StiffnessReport(ResultMixin):
     eigenvalues: np.ndarray
     spectral_radius: float
     stiffness_ratio: float
@@ -982,7 +972,7 @@ def analyze_stiffness(
 
 
 @dataclass
-class PartitionedCouplingReport:
+class PartitionedCouplingReport(ResultMixin):
     converged: bool
     iterations: int
     solution: np.ndarray
@@ -1079,7 +1069,7 @@ def solve_partitioned_fixed_point(
 
 
 @dataclass
-class CoSimulationReport:
+class CoSimulationReport(ResultMixin):
     t: np.ndarray
     states: List[str]
     y_cosim: np.ndarray

@@ -40,6 +40,7 @@ from scipy.sparse import lil_matrix
 
 from ._parsing import ExprLike, names, parse_expr, real_symbol
 from .integrators import integrate_fixed, is_fixed_scheme
+from .results import ResultMixin
 
 _GAUSS_X = np.array([-np.sqrt(3.0 / 5.0), 0.0, np.sqrt(3.0 / 5.0)])
 _GAUSS_W = np.array([5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0])
@@ -131,7 +132,7 @@ def parse_bcs(spec: Any) -> Tuple[BC, BC]:
 
 
 @dataclass
-class PDESolution:
+class PDESolution(ResultMixin):
     fields: List[str]
     x: np.ndarray
     edges: np.ndarray

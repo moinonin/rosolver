@@ -83,6 +83,7 @@ from scipy.sparse import lil_matrix
 
 from .integrators import integrate_fixed, is_fixed_scheme
 from .numerical import SheddingEventSpec, SheddingRecord
+from .results import ResultMixin
 
 _SCIPY_IMPLICIT = ("BDF", "Radau", "LSODA")
 
@@ -131,7 +132,7 @@ def stefan_shedding_event(
 
 
 @dataclass
-class StefanSolution:
+class StefanSolution(ResultMixin):
     """Time history of the moving front, surface state, and ice temperature field."""
 
     t: np.ndarray

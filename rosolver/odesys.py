@@ -18,13 +18,24 @@ from scipy.integrate import solve_ivp
 
 from ._parsing import ExprLike, names, parse_expr, real_symbol
 from .integrators import integrate_fixed, is_fixed_scheme
+from .results import ResultMixin
 
 ParamValue = Union[float, Callable[[float], float]]
 _IMPLICIT_SCIPY = ("BDF", "Radau", "LSODA")
 
 
 @dataclass
-class Trajectory:
+class EventSpec:
+    """Zero-crossing event specification for `ODESystem.solve`."""
+
+    name: str
+    expr: Union[ExprLike, Callable[[float, np.ndarray], float]]
+    terminal: bool = False
+    direction: float = 0.0
+
+
+@dataclass
+class Trajectory(ResultMixin):
     """Time history of an ODE solve."""
 
     t: np.ndarray
@@ -38,6 +49,8 @@ class Trajectory:
     njev: int = 0
     newton_failures: int = 0
     warnings: List[str] = field(default_factory=list)
+    t_events: Dict[str, np.ndarray] = field(default_factory=dict)
+    y_events: Dict[str, np.ndarray] = field(default_factory=dict)
 
     def __getitem__(self, name: str) -> np.ndarray:
         return self.y[:, self.states.index(name)]
@@ -138,6 +151,45 @@ class ODESystem:
 
         return J
 
+    def _compile_events(
+        self,
+        events: Optional[Sequence[Union[EventSpec, Callable]]],
+        params: Optional[Mapping[str, ParamValue]],
+    ) -> Tuple[List[str], List[Callable]]:
+        if not events:
+            return [], []
+        pv = self._param_getter(params)
+        ev_names: List[str] = []
+        ev_fns: List[Callable] = []
+        for idx, ev in enumerate(events):
+            if isinstance(ev, EventSpec):
+                ev_names.append(ev.name)
+                if callable(ev.expr) and not isinstance(ev.expr, sp.Basic):
+                    raw_fn = ev.expr
+
+                    def _fn(t, y, g=raw_fn):
+                        return float(g(t, y))
+                else:
+                    e = parse_expr(ev.expr, self._symbols)
+                    unknown = names(e) - set(self.states) - set(self.params) - {self.indep}
+                    if unknown:
+                        raise KeyError(f"Unknown symbols {sorted(unknown)} in event '{ev.name}'.")
+                    args = [self.t, *self.state_syms, *self.param_syms]
+                    compiled = sp.lambdify(args, e, "numpy")
+
+                    def _fn(t, y, g=compiled, get_p=pv):
+                        return float(g(t, *y, *get_p(t)))
+
+                _fn.terminal = bool(ev.terminal)  # type: ignore[attr-defined]
+                _fn.direction = float(ev.direction)  # type: ignore[attr-defined]
+                ev_fns.append(_fn)
+            elif callable(ev):
+                ev_names.append(getattr(ev, "__name__", f"event_{idx}"))
+                ev_fns.append(ev)
+            else:
+                raise TypeError(f"Unsupported event specification type: {type(ev)!r}.")
+        return ev_names, ev_fns
+
     def solve(
         self,
         t_span: Tuple[float, float],
@@ -151,6 +203,7 @@ class ODESystem:
         dt: Optional[float] = None,
         max_step: float = np.inf,
         raise_on_failure: bool = False,
+        events: Optional[Sequence[Union[EventSpec, Callable]]] = None,
     ) -> Trajectory:
         """
         Integrate the system. `method` is a scipy name ('RK45', 'Radau', 'BDF', 'LSODA', ...)
@@ -159,6 +212,8 @@ class ODESystem:
         y0v = self._y0(y0)
         f = self.rhs_function(params)
         if is_fixed_scheme(method):
+            if events:
+                raise ValueError("Event detection requires a scipy solve_ivp method (fixed-step schemes do not support events).")
             if dt is None:
                 raise ValueError(f"Fixed-step scheme '{method}' requires dt.")
             res = integrate_fixed(f, t_span, y0v, dt, scheme=method, n_out=n_out if t_eval is None else None,
@@ -175,15 +230,27 @@ class ODESystem:
             return Trajectory(res.t, res.y, list(self.states), res.scheme, res.nfev, ok,
                               msg, dt=res.dt, newton_failures=res.newton_failures, warnings=warns)
         te = np.linspace(t_span[0], t_span[1], (n_out or 200) + 1) if t_eval is None else np.asarray(t_eval)
-        kw = {"jac": self.jac_function(params)} if method in _IMPLICIT_SCIPY else {}
+        kw: Dict[str, object] = {"jac": self.jac_function(params)} if method in _IMPLICIT_SCIPY else {}
+        ev_names, ev_fns = self._compile_events(events, params)
+        if ev_fns:
+            kw["events"] = ev_fns
         sol = solve_ivp(f, t_span, y0v, method=method, t_eval=te, rtol=rtol, atol=atol, max_step=max_step, **kw)
         ok = bool(sol.success)
         msg = str(sol.message)
         warns = [] if ok else [f"ODE solver '{method}' did not succeed: {msg}"]
         if raise_on_failure and not ok:
             raise RuntimeError(msg)
-        return Trajectory(sol.t, sol.y.T, list(self.states), method, int(sol.nfev), ok,
-                          msg, njev=int(getattr(sol, "njev", 0) or 0), warnings=warns)
+        t_ev_map: Dict[str, np.ndarray] = {}
+        y_ev_map: Dict[str, np.ndarray] = {}
+        if ev_names and sol.t_events is not None:
+            for i, ename in enumerate(ev_names):
+                t_ev_map[ename] = np.asarray(sol.t_events[i], dtype=float)
+                y_ev_map[ename] = np.asarray(sol.y_events[i], dtype=float)
+        return Trajectory(
+            sol.t, sol.y.T, list(self.states), method, int(sol.nfev), ok,
+            msg, njev=int(getattr(sol, "njev", 0) or 0), warnings=warns,
+            t_events=t_ev_map, y_events=y_ev_map,
+        )
 
     def step(self, t0: float, t1: float, y0, params=None, method: str = "RK45",
              rtol: float = 1e-10, atol: float = 1e-12) -> np.ndarray:

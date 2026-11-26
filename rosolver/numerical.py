@@ -24,12 +24,13 @@ from scipy.optimize import least_squares
 from scipy.stats import t as student_t
 import sympy as sp
 
+from .results import ResultMixin
 from .symbolic import CandidateEquation, DerivationResult
 from .templates import TEMPLATE_REGISTRY
 
 
 @dataclass
-class IdentifiabilityReport:
+class IdentifiabilityReport(ResultMixin):
     """Jacobian conditioning, rank, and parameter-correlation identifiability diagnostics."""
 
     identifiable: bool
@@ -53,7 +54,7 @@ class RejectedCandidate:
 
 
 @dataclass
-class FitResult:
+class FitResult(ResultMixin):
     """Empirical calibration statistics and calibrated symbolic equation."""
 
     candidate_name: str
@@ -101,7 +102,7 @@ class FitResult:
 
 
 @dataclass
-class CandidateRankingReport:
+class CandidateRankingReport(ResultMixin):
     """Multi-criterion candidate comparison separating admissibility, statistical fit, and rejections."""
 
     ranked: List[FitResult]
@@ -121,7 +122,7 @@ class CandidateRankingReport:
 
 
 @dataclass
-class ODESolution:
+class ODESolution(ResultMixin):
     """Result of numerically integrating a formulated rate equation dg/df = RHS."""
 
     wrt_values: np.ndarray
@@ -159,7 +160,7 @@ class SheddingRecord:
 
 
 @dataclass
-class HybridODESolution:
+class HybridODESolution(ResultMixin):
     """Piecewise-smooth trajectory with discontinuous threshold-triggered shedding resets."""
 
     wrt_values: np.ndarray
