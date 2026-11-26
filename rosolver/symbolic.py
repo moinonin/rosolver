@@ -22,6 +22,7 @@ import sympy as sp
 
 from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
 from .system import RelationSpec, System
+from .templates import TEMPLATE_REGISTRY
 
 
 @dataclass
@@ -58,6 +59,9 @@ class CandidateEquation:
     pi_groups: List[sp.Expr] = field(default_factory=list)
     is_exact_state: bool = True
     notes: str = ""
+    dimensionally_consistent: bool = True
+    assumptions: List[str] = field(default_factory=list)
+    template_name: Optional[str] = None
 
 
 @dataclass
@@ -89,6 +93,7 @@ class DerivationResult:
     free_parameters: List[sp.Symbol]
     steps: List[DerivationStep]
     diagnostics: List[str] = field(default_factory=list)
+    rejected_candidates: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def primary(self) -> CandidateEquation:
@@ -132,6 +137,7 @@ class SymbolicSolver:
         unit_constants: bool = False,
         include_intercepts: Optional[bool] = None,
         include_saturating: bool = False,
+        templates: Optional[Sequence[str]] = None,
     ) -> DerivationResult:
         """
         Formulate equation(s) for `target` (optionally expressed as a function of `wrt`).
@@ -144,6 +150,10 @@ class SymbolicSolver:
             zero_initials: If True, sets integration baseline offsets (g_0, b_0, ...) to 0.
             unit_constants: If True, sets leading dimensionless scaling constants kappa = 1.
             include_intercepts: Override per-relation affine rate intercept beta_0.
+            include_saturating: Include saturating Pi templates (Hill, Rosin-Rammler) when
+                `templates` is not explicitly specified.
+            templates: Optional sequence of template registry names/aliases to apply when
+                dimensionless Pi-groups exist.
         """
         if target not in self.system.variables:
             raise KeyError(f"Unknown target variable '{target}'.")
@@ -155,6 +165,7 @@ class SymbolicSolver:
 
         steps: List[DerivationStep] = []
         diagnostics: List[str] = []
+        rejected_candidates: List[Dict[str, str]] = []
         syms = self.system.symbols_map()
 
         # Step 1: Construct general & active DAG chain-rule equations
@@ -239,6 +250,7 @@ class SymbolicSolver:
                 include_intercept=use_intercept,
                 steps=steps,
                 diagnostics=diagnostics,
+                rejected_candidates=rejected_candidates,
             )
             resolutions[node] = res
             if res.pi_groups:
@@ -277,7 +289,9 @@ class SymbolicSolver:
                     rate_terms += beta_inp.subs(subs_up) * d_inp_dwrt
 
             if (target_rel.include_intercept if include_intercepts is None else include_intercepts):
-                b0_sym = self._solve_intercept_term(target, wrt, target_rel, unit_constants, all_free_params)
+                b0_sym = self._solve_intercept_term(
+                    target, wrt, target_rel, unit_constants, all_free_params, diagnostics=diagnostics
+                )
                 rate_terms = b0_sym + rate_terms
 
             rate_terms = sp.simplify(rate_terms)
@@ -321,6 +335,12 @@ class SymbolicSolver:
 
         primary_free = self._extract_free_params(primary_rhs, all_free_params)
         target_res = resolutions[target]
+        target_consistent = all(sol.consistent for sol in target_res.dim_solutions.values())
+        primary_assumptions: List[str] = []
+        if len(self.system.relations[target].inputs) > 1 and target_res.is_exact:
+            primary_assumptions.append("Assumes C^2 scalar potential satisfying Clairaut mixed-partial symmetry.")
+        if not target_consistent:
+            primary_assumptions.append("Includes dimensionally unclosed fallback coefficient(s).")
         candidates.append(
             CandidateEquation(
                 name="leading_dimensional",
@@ -331,10 +351,12 @@ class SymbolicSolver:
                 pi_groups=pi_map.get(target, []),
                 is_exact_state=target_res.is_exact,
                 notes="Leading dimensional-closure equation.",
+                dimensionally_consistent=target_consistent,
+                assumptions=primary_assumptions,
             )
         )
 
-        # Generate Buckingham-Pi enriched candidates when dimensionless Pi-groups exist!
+        # Generate Buckingham-Pi enriched candidates via pluggable TEMPLATE_REGISTRY
         all_pis: List[sp.Expr] = []
         for node, pis in pi_map.items():
             subs_up = {syms[k]: v for k, v in composed_map.items() if k != node}
@@ -348,101 +370,57 @@ class SymbolicSolver:
             core_term = primary_rhs if zero_initials else sp.simplify(primary_rhs - init_sym)
             offset_term = sp.Integer(0) if zero_initials else init_sym
 
-            # Candidate A: Power-law Pi-group scaling (e.g. Blasius Re^(-1/2))
-            nu_syms = [sp.Symbol(f"nu_{idx}", real=True) for idx in range(1, len(all_pis) + 1)]
-            pi_pow_factor = sp.Integer(1)
-            for pi_e, nu_s in zip(all_pis, nu_syms):
-                pi_pow_factor *= pi_e ** nu_s
-            pow_rhs = offset_term + core_term * pi_pow_factor
-            pow_eq = sp.Eq(target_sym, pow_rhs)
-            pow_free = self._extract_free_params(pow_rhs, all_free_params + nu_syms)
-            candidates.append(
-                CandidateEquation(
-                    name="buckingham_pi_power",
-                    kind="pi_power",
-                    equation=pow_eq,
-                    rhs=pow_rhs,
-                    free_params=pow_free,
-                    pi_groups=all_pis,
-                    is_exact_state=target_res.is_exact,
-                    notes="Modulated by power-law Buckingham Pi dimensionless group(s).",
-                )
+            selected_templates = (
+                [TEMPLATE_REGISTRY.get(t) for t in templates]
+                if templates is not None
+                else TEMPLATE_REGISTRY.list(include_saturating=include_saturating)
             )
+            first_pi_eq: Optional[sp.Eq] = None
+            added_names: List[str] = []
+            for tmpl in selected_templates:
+                try:
+                    mod_factor, extra_syms = tmpl.build_factor(all_pis)
+                    cand_rhs = offset_term + core_term * mod_factor
+                    cand_eq = sp.Eq(target_sym, cand_rhs)
+                    cand_free = self._extract_free_params(cand_rhs, all_free_params + extra_syms)
+                    candidates.append(
+                        CandidateEquation(
+                            name=tmpl.candidate_name,
+                            kind=tmpl.kind,
+                            equation=cand_eq,
+                            rhs=cand_rhs,
+                            free_params=cand_free,
+                            pi_groups=all_pis,
+                            is_exact_state=target_res.is_exact,
+                            notes=tmpl.description,
+                            dimensionally_consistent=target_consistent,
+                            assumptions=list(tmpl.assumptions) + primary_assumptions,
+                            template_name=tmpl.name,
+                        )
+                    )
+                    if first_pi_eq is None:
+                        first_pi_eq = cand_eq
+                    added_names.append(tmpl.name)
+                except Exception as exc:
+                    rejected_candidates.append(
+                        {
+                            "name": tmpl.candidate_name,
+                            "template": tmpl.name,
+                            "reason": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
 
-            # Candidate B: First-order affine Pi-group correction (e.g. 1 + lambda_1 * Pi_1)
-            lam_syms = [sp.Symbol(f"lam_{idx}", real=True) for idx in range(1, len(all_pis) + 1)]
-            pi_aff_factor = sp.Integer(1) + sum(l_s * pi_e for l_s, pi_e in zip(lam_syms, all_pis))
-            aff_rhs = offset_term + core_term * pi_aff_factor
-            aff_eq = sp.Eq(target_sym, aff_rhs)
-            aff_free = self._extract_free_params(aff_rhs, all_free_params + lam_syms)
-            candidates.append(
-                CandidateEquation(
-                    name="buckingham_pi_affine",
-                    kind="pi_affine",
-                    equation=aff_eq,
-                    rhs=aff_rhs,
-                    free_params=aff_free,
-                    pi_groups=all_pis,
-                    is_exact_state=target_res.is_exact,
-                    notes="First-order affine series in Buckingham Pi dimensionless group(s).",
-                )
-            )
-
-            if include_saturating:
-                # Candidate C: Rational / Hill saturating Pi-template in (0, 1) (e.g. collection efficiency, freezing fraction)
-                gam_syms = [
-                    sp.Symbol(f"gam_{idx}", positive=True, real=True) for idx in range(1, len(all_pis) + 1)
-                ]
-                hill_factor = sp.Integer(1)
-                exp_sat_factor = sp.Integer(1)
-                for pi_e, nu_s, gam_s in zip(all_pis, nu_syms, gam_syms):
-                    scaled = gam_s * (pi_e ** nu_s)
-                    hill_factor *= scaled / (sp.Integer(1) + scaled)
-                    exp_sat_factor *= sp.Integer(1) - sp.exp(-scaled)
-
-                hill_rhs = offset_term + core_term * hill_factor
-                hill_eq = sp.Eq(target_sym, hill_rhs)
-                hill_free = self._extract_free_params(hill_rhs, all_free_params + gam_syms + nu_syms)
-                candidates.append(
-                    CandidateEquation(
-                        name="buckingham_pi_hill",
-                        kind="pi_hill",
-                        equation=hill_eq,
-                        rhs=hill_rhs,
-                        free_params=hill_free,
-                        pi_groups=all_pis,
-                        is_exact_state=target_res.is_exact,
-                        notes="Rational/Hill saturating [0,1] Pi-modulation (impingement / Messinger freezing regime).",
+            if first_pi_eq is not None:
+                steps.append(
+                    DerivationStep(
+                        stage="Buckingham-Pi Generalization",
+                        explanation=(
+                            f"Nullity > 0 yielded dimensionless group(s) {', '.join(str(p) for p in all_pis)}; "
+                            f"generated template candidate(s): {', '.join(added_names)}."
+                        ),
+                        equation=first_pi_eq,
                     )
                 )
-
-                # Candidate D: Exponential / Rosin-Rammler saturating template 1 - exp(-gam * Pi^nu) (AIChE 2016 Eq. 14)
-                exp_rhs = offset_term + core_term * exp_sat_factor
-                exp_eq = sp.Eq(target_sym, exp_rhs)
-                exp_free = self._extract_free_params(exp_rhs, all_free_params + gam_syms + nu_syms)
-                candidates.append(
-                    CandidateEquation(
-                        name="buckingham_pi_exp_sat",
-                        kind="pi_exp_sat",
-                        equation=exp_eq,
-                        rhs=exp_rhs,
-                        free_params=exp_free,
-                        pi_groups=all_pis,
-                        is_exact_state=target_res.is_exact,
-                        notes="Exponential Rosin-Rammler saturating [0,1] Pi-modulation.",
-                    )
-                )
-
-            steps.append(
-                DerivationStep(
-                    stage="Buckingham-Pi Generalization",
-                    explanation=(
-                        f"Nullity > 0 yielded dimensionless group(s) {', '.join(str(p) for p in all_pis)}; "
-                        f"added power-law and affine Pi-modulated candidates."
-                    ),
-                    equation=pow_eq,
-                )
-            )
 
         return DerivationResult(
             target=target,
@@ -457,6 +435,7 @@ class SymbolicSolver:
             free_parameters=all_free_params,
             steps=steps,
             diagnostics=diagnostics,
+            rejected_candidates=rejected_candidates,
         )
 
     def _build_chain_rule_equations(self, target: str, wrt: Optional[str]) -> Tuple[sp.Eq, sp.Eq]:
@@ -514,6 +493,7 @@ class SymbolicSolver:
         include_intercept: bool,
         steps: List[DerivationStep],
         diagnostics: List[str],
+        rejected_candidates: Optional[List[Dict[str, str]]] = None,
     ) -> NodeResolution:
         syms = self.system.symbols_map()
         target_var = self.system.variables[rel.target]
@@ -575,9 +555,14 @@ class SymbolicSolver:
                 is_exact = True
             else:
                 is_exact = False
+                reason = f"Node '{rel.target}' leading monomials violate Clairaut mixed-partial symmetry."
                 if rel.conservative is True:
                     diagnostics.append(
                         f"Node '{rel.target}' requested conservative=True, but leading monomials violate Clairaut symmetry."
+                    )
+                if rejected_candidates is not None:
+                    rejected_candidates.append(
+                        {"name": f"{rel.target}_clairaut_exact", "template": "clairaut", "reason": reason}
                     )
                 for inp in rel.inputs:
                     coeff = sp.Integer(1) if unit_constants else kappa_syms[inp]
@@ -753,12 +738,6 @@ class SymbolicSolver:
                 return None
             acc = sp.simplify(acc + term)
 
-        # Clean constant rescale if a single master kappa_<target> has a rational prefactor like 2*kappa_K -> kappa_K
-        master = sp.Symbol(f"kappa_{target}", real=True)
-        if master in free_params and acc.has(master):
-            # Keep exact rational prefactors when user sets unit_constants, otherwise check if clean
-            pass
-
         if not zero_initials:
             init_s = self.system.variables[target].initial_symbol
             if init_s not in free_params:
@@ -773,7 +752,27 @@ class SymbolicSolver:
         rel: RelationSpec,
         unit_constants: bool,
         free_params: List[sp.Symbol],
+        diagnostics: Optional[List[str]] = None,
     ) -> sp.Expr:
+        target_var = self.system.variables[target]
+        wrt_var = self.system.variables[wrt]
+        if target_var.dim is not None and wrt_var.dim is not None:
+            needed_dim = target_var.dim / wrt_var.dim
+            scope_names = list(dict.fromkeys(rel.inputs + rel.params))
+            scope_pairs = [
+                (n, self.system.variables[n].dim)
+                for n in scope_names
+                if self.system.variables[n].dim is not None
+            ]
+            sol = DimensionalEngine.solve(needed_dim, scope_pairs)  # type: ignore[arg-type]
+            if sol.consistent:
+                mono = sol.particular_monomial(self.system.symbols_map())
+                k0 = sp.Integer(1) if unit_constants else sp.Symbol(f"kappa_{target}_0", real=True)
+                if not unit_constants and k0 not in free_params:
+                    free_params.append(k0)
+                return sp.simplify(k0 * mono)
+            if diagnostics is not None:
+                diagnostics.append(f"[{target} intercept wrt {wrt}] {sol.diagnostic}")
         b0 = sp.Symbol(f"beta_{target}_0", real=True)
         if b0 not in free_params:
             free_params.append(b0)

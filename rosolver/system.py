@@ -26,13 +26,19 @@ class Variable:
     dim: Optional[Dimension] = None
     role: str = "variable"  # "variable" or "constant"
     description: str = ""
+    positive: Optional[bool] = True
     symbol: sp.Symbol = field(init=False)
     initial_symbol: sp.Symbol = field(init=False)
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.name):
             raise ValueError(f"Invalid variable identifier: '{self.name}'")
-        self.symbol = sp.Symbol(self.name, positive=True, real=True)
+        if self.positive is True:
+            self.symbol = sp.Symbol(self.name, positive=True, real=True)
+        elif self.positive is False:
+            self.symbol = sp.Symbol(self.name, negative=True, real=True)
+        else:
+            self.symbol = sp.Symbol(self.name, real=True)
         self.initial_symbol = sp.Symbol(f"{self.name}_0", real=True)
 
 
@@ -87,9 +93,10 @@ class System:
         name: str,
         dim: Union[str, Dimension, Mapping[str, Union[int, float, str, sp.Rational]], None] = None,
         description: str = "",
+        positive: Optional[bool] = True,
     ) -> Variable:
         parsed_dim = None if dim is None else Dimension.parse(dim)
-        v = Variable(name=name, dim=parsed_dim, role="variable", description=description)
+        v = Variable(name=name, dim=parsed_dim, role="variable", description=description, positive=positive)
         self.variables[name] = v
         return v
 
@@ -98,9 +105,10 @@ class System:
         name: str,
         dim: Union[str, Dimension, Mapping[str, Union[int, float, str, sp.Rational]], None] = None,
         description: str = "",
+        positive: Optional[bool] = True,
     ) -> Variable:
         parsed_dim = None if dim is None else Dimension.parse(dim)
-        v = Variable(name=name, dim=parsed_dim, role="constant", description=description)
+        v = Variable(name=name, dim=parsed_dim, role="constant", description=description, positive=positive)
         self.variables[name] = v
         return v
 

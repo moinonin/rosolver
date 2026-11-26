@@ -16,14 +16,40 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from fractions import Fraction
 from itertools import combinations
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import least_squares
+from scipy.stats import t as student_t
 import sympy as sp
 
 from .symbolic import CandidateEquation, DerivationResult
+from .templates import TEMPLATE_REGISTRY
+
+
+@dataclass
+class IdentifiabilityReport:
+    """Jacobian conditioning, rank, and parameter-correlation identifiability diagnostics."""
+
+    identifiable: bool
+    condition_number: float
+    singular_values: np.ndarray
+    numerical_rank: int
+    n_params: int
+    max_abs_correlation: float
+    correlation_matrix: Optional[np.ndarray] = None
+    collinear_pairs: List[Tuple[str, str, float]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class RejectedCandidate:
+    """Candidate formulation that failed calibration or screening, with recorded reason."""
+
+    candidate_name: str
+    reason: str
+    stage: str = "fitting"
 
 
 @dataclass
@@ -44,17 +70,54 @@ class FitResult:
     residuals: np.ndarray
     converged: bool = True
     message: str = ""
+    confidence_intervals: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+    covariance_matrix: Optional[np.ndarray] = None
+    correlation_matrix: Optional[np.ndarray] = None
+    identifiability: Optional[IdentifiabilityReport] = None
+    weighted: bool = False
+    objective_value: float = float("nan")
+    n_dropped_missing: int = 0
+    optimizer_config: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    admissibility_tier: str = "statistically_supported"
 
     def summary(self) -> str:
         p_str = ", ".join(
             f"{k}={v:.6g} (±{self.std_errors.get(k, float('nan')):.3g})"
             for k, v in self.params.items()
         )
-        return (
-            f"[{self.candidate_name}] R²={self.r2:.6f}, RMSE={self.rmse:.6g}, BIC={self.bic:.3f}\n"
-            f"  Params: {p_str}\n"
-            f"  Calibrated: {self.calibrated_equation.lhs} = {self.calibrated_equation.rhs}"
-        )
+        method_tag = self.optimizer_config.get("method", "WLS" if self.weighted else "fit")
+        id_tag = ""
+        if self.identifiability is not None:
+            id_tag = f", identifiable={self.identifiability.identifiable}"
+        lines = [
+            f"[{self.candidate_name}] ({method_tag}{id_tag}) R²={self.r2:.6f}, RMSE={self.rmse:.6g}, BIC={self.bic:.3f}",
+            f"  Params: {p_str}",
+            f"  Calibrated: {self.calibrated_equation.lhs} = {self.calibrated_equation.rhs}",
+        ]
+        for w in self.warnings:
+            lines.append(f"  Warning: {w}")
+        return "\n".join(lines)
+
+
+@dataclass
+class CandidateRankingReport:
+    """Multi-criterion candidate comparison separating admissibility, statistical fit, and rejections."""
+
+    ranked: List[FitResult]
+    rejected: List[RejectedCandidate]
+    criterion: str
+    categories: Dict[str, List[str]] = field(default_factory=dict)
+
+    def summary(self) -> str:
+        lines = [f"=== Candidate Ranking ({self.criterion.upper()}) ==="]
+        for idx, fr in enumerate(self.ranked, 1):
+            lines.append(f"{idx}. {fr.summary()}")
+        if self.rejected:
+            lines.append("Rejected candidates:")
+            for r in self.rejected:
+                lines.append(f"  - [{r.candidate_name}] ({r.stage}): {r.reason}")
+        return "\n".join(lines)
 
 
 @dataclass
@@ -211,6 +274,96 @@ class NumericalSolver:
                 return False
         return True
 
+    @staticmethod
+    def _analyze_identifiability(
+        J_w: np.ndarray,
+        param_names: Sequence[str],
+        pinv_info: np.ndarray,
+        n_obs: int,
+        cond_threshold: float = 1e8,
+        corr_threshold: float = 0.98,
+    ) -> IdentifiabilityReport:
+        k_params = len(param_names)
+        norms = np.linalg.norm(J_w, axis=0)
+        zero_cols = [param_names[i] for i, nm in enumerate(norms) if nm <= 1e-15]
+        J_norm = J_w / np.where(norms > 1e-15, norms, 1.0)
+        s = np.linalg.svd(J_norm, compute_uv=False)
+        s_max = float(s[0]) if s.size else 0.0
+        numerical_rank = int(np.sum(s > 1e-12 * max(s_max, 1.0)))
+        if zero_cols or len(s) < k_params or (s.size > 0 and s[-1] <= 1e-15):
+            cond = float("inf")
+        else:
+            cond = float(s[0] / s[-1])
+
+        diag = np.diag(pinv_info)
+        denom = np.sqrt(np.outer(np.maximum(diag, 0.0), np.maximum(diag, 0.0)))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            corr = np.where(denom > 1e-30, pinv_info / denom, np.nan)
+        for i in range(k_params):
+            if diag[i] > 1e-30:
+                corr[i, i] = 1.0
+
+        collinear_pairs: List[Tuple[str, str, float]] = []
+        max_abs_corr = 0.0
+        for i in range(k_params):
+            for j in range(i + 1, k_params):
+                rij = float(corr[i, j])
+                if np.isfinite(rij):
+                    abs_r = abs(rij)
+                    if abs_r > max_abs_corr:
+                        max_abs_corr = abs_r
+                    if abs_r >= corr_threshold:
+                        collinear_pairs.append((param_names[i], param_names[j], rij))
+
+        warnings: List[str] = []
+        for zname in zero_cols:
+            warnings.append(f"Parameter '{zname}' has zero local sensitivity (structurally unidentifiable).")
+        if n_obs <= k_params:
+            warnings.append(
+                f"Degrees of freedom exhausted (n_obs={n_obs} <= n_params={k_params}); parameter uncertainty unreliable."
+            )
+        if numerical_rank < k_params:
+            warnings.append(
+                f"Jacobian is rank-deficient (rank {numerical_rank} < {k_params} parameters); "
+                "parameters are not jointly identifiable."
+            )
+        elif cond > cond_threshold:
+            warnings.append(
+                f"Ill-conditioned parameter Jacobian (cond={cond:.2e} > {cond_threshold:.2e})."
+            )
+        for p1, p2, rij in collinear_pairs:
+            warnings.append(f"Near-collinear parameters ({p1}, {p2}): correlation r={rij:+.4f}.")
+
+        return IdentifiabilityReport(
+            identifiable=(len(warnings) == 0),
+            condition_number=cond,
+            singular_values=s,
+            numerical_rank=numerical_rank,
+            n_params=k_params,
+            max_abs_correlation=max_abs_corr,
+            correlation_matrix=corr,
+            collinear_pairs=collinear_pairs,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _confidence_intervals(
+        param_names: Sequence[str],
+        theta_hat: np.ndarray,
+        ses: np.ndarray,
+        n_obs: int,
+        k_params: int,
+        confidence_level: float,
+    ) -> Dict[str, Tuple[float, float]]:
+        if n_obs <= k_params or k_params == 0:
+            return {nm: (float("nan"), float("nan")) for nm in param_names}
+        dof = n_obs - k_params
+        t_crit = float(student_t.ppf(0.5 * (1.0 + confidence_level), dof))
+        return {
+            nm: (float(val - t_crit * se), float(val + t_crit * se))
+            for nm, val, se in zip(param_names, theta_hat, ses)
+        }
+
     @classmethod
     def fit(
         cls,
@@ -223,14 +376,32 @@ class NumericalSolver:
         bounds: Optional[Mapping[str, Tuple[float, float]]] = None,
         loss: str = "linear",
         clean_tol: float = 1e-10,
+        weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+        sigma_y: Optional[Union[Sequence[float], np.ndarray]] = None,
+        missing_policy: str = "raise",
+        confidence_level: float = 0.95,
+        cond_threshold: float = 1e8,
+        corr_threshold: float = 0.98,
     ) -> FitResult:
         """
         Calibrate unknown constants / Pi-group exponents from observational data.
 
-        Automatically dispatches to exact SVD Ordinary Least Squares when linear in
-        parameters (without bounds), and analytic-Jacobian Trust-Region Nonlinear
-        Least Squares otherwise.
+        Automatically dispatches to exact SVD Ordinary / Weighted Least Squares when linear in
+        parameters (without bounds), and analytic-Jacobian Trust-Region Nonlinear Least Squares
+        otherwise. Evaluates Jacobian conditioning, rank, correlation, and confidence intervals.
         """
+        if missing_policy not in ("raise", "drop", "mask"):
+            raise ValueError(f"Invalid missing_policy '{missing_policy}'. Choose 'raise', 'drop', or 'mask'.")
+        if weights is not None and sigma_y is not None:
+            raise ValueError("Provide either `weights` or `sigma_y`, not both.")
+        if not 0.0 < confidence_level < 1.0:
+            raise ValueError("confidence_level must satisfy 0 < confidence_level < 1.")
+
+        tmpl_obj = (
+            TEMPLATE_REGISTRY.get(model.template_name)
+            if isinstance(model, CandidateEquation) and model.template_name
+            else None
+        )
         cand_name, lhs_sym, rhs, param_syms = cls._extract_expr_and_params(model, free_params)
 
         if fixed_params:
@@ -244,8 +415,8 @@ class NumericalSolver:
             raise KeyError(f"Target column '{t_name}' not found in data keys {list(data.keys())}.")
 
         y = np.asarray(data[t_name], dtype=float).reshape(-1)
-        n_obs = y.size
-        if n_obs == 0:
+        n_raw = y.size
+        if n_raw == 0:
             raise ValueError("Cannot fit on empty dataset.")
 
         data_syms = [s for s in sorted(rhs.free_symbols, key=str) if s not in param_syms]
@@ -254,22 +425,91 @@ class NumericalSolver:
             raise KeyError(f"Missing data columns for variables {missing_cols}.")
 
         x_arrays = [
-            np.broadcast_to(np.asarray(data[str(s)], dtype=float), (n_obs,)).copy()
+            np.broadcast_to(np.asarray(data[str(s)], dtype=float), (n_raw,)).copy()
             for s in data_syms
         ]
 
+        is_weighted = (weights is not None) or (sigma_y is not None)
+        if weights is not None:
+            w_arr = np.broadcast_to(np.asarray(weights, dtype=float).reshape(-1), (n_raw,)).copy()
+        elif sigma_y is not None:
+            s_arr = np.broadcast_to(np.asarray(sigma_y, dtype=float).reshape(-1), (n_raw,)).copy()
+            w_arr = None
+        else:
+            w_arr = None
+            s_arr = None
+
+        # Check non-finite values across target, predictors, and weights/uncertainties
+        bad_cols: List[str] = []
+        valid_mask = np.isfinite(y)
+        if not np.all(valid_mask):
+            bad_cols.append(t_name)
+        for s, arr in zip(data_syms, x_arrays):
+            col_ok = np.isfinite(arr)
+            if not np.all(col_ok):
+                bad_cols.append(str(s))
+            valid_mask &= col_ok
+        if w_arr is not None:
+            col_ok = np.isfinite(w_arr)
+            if not np.all(col_ok):
+                bad_cols.append("weights")
+            valid_mask &= col_ok
+        if s_arr is not None:
+            col_ok = np.isfinite(s_arr)
+            if not np.all(col_ok):
+                bad_cols.append("sigma_y")
+            valid_mask &= col_ok
+
+        n_dropped = int(n_raw - np.count_nonzero(valid_mask))
+        if n_dropped > 0:
+            if missing_policy == "raise":
+                raise ValueError(
+                    f"Non-finite (NaN/Inf) entries found in column(s) {bad_cols} "
+                    f"({n_dropped} row(s)); set missing_policy='drop' to omit incomplete rows."
+                )
+            y = y[valid_mask]
+            x_arrays = [arr[valid_mask] for arr in x_arrays]
+            if w_arr is not None:
+                w_arr = w_arr[valid_mask]
+            if s_arr is not None:
+                s_arr = s_arr[valid_mask]
+
+        n_obs = y.size
+        if n_obs == 0:
+            raise ValueError("No finite observations remain after filtering missing rows.")
+
+        if w_arr is not None:
+            if np.any(w_arr <= 0.0):
+                raise ValueError("All observation weights must be strictly positive.")
+            sqrt_w = np.sqrt(w_arr)
+        elif s_arr is not None:
+            if np.any(s_arr <= 0.0):
+                raise ValueError("All measurement uncertainties sigma_y must be strictly positive.")
+            sqrt_w = 1.0 / s_arr
+        else:
+            sqrt_w = np.ones(n_obs, dtype=float)
+
+        fit_warnings: List[str] = []
+        if n_dropped > 0:
+            fit_warnings.append(f"Dropped {n_dropped} observation(s) with non-finite values (policy='{missing_policy}').")
+
         k_params = len(param_syms)
+        param_names = [str(p) for p in param_syms]
         if k_params == 0:
             fn_eval = sp.lambdify(data_syms, rhs, modules="numpy")
             preds = np.broadcast_to(np.asarray(fn_eval(*x_arrays), dtype=float), (n_obs,)).copy()
+            obj_val = float(np.sum((sqrt_w * (y - preds)) ** 2))
             return cls._build_fit_result(
-                cand_name, lhs_sym, rhs, {}, {}, y, preds, True, "No free parameters.", clean_tol
+                cand_name, lhs_sym, rhs, {}, {}, y, preds, True, "No free parameters.", clean_tol,
+                weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+                optimizer_config={"method": "direct_eval", "loss": loss, "weighted": is_weighted},
+                warnings=fit_warnings,
             )
 
         is_lin = cls._is_linear_in_params(rhs, param_syms) and bounds is None and loss == "linear"
 
         if is_lin:
-            # Exact Ordinary Least Squares: rhs = base(x) + sum_j p_j * phi_j(x)
+            # Exact Ordinary / Weighted Least Squares: rhs = base(x) + sum_j p_j * phi_j(x)
             zero_subs = {p: 0 for p in param_syms}
             base_expr = sp.simplify(rhs.subs(zero_subs))
             base_fn = sp.lambdify(data_syms, base_expr, modules="numpy")
@@ -284,37 +524,60 @@ class NumericalSolver:
             X_mat = np.column_stack(cols)
             y_adj = y - base_vec
 
-            theta_hat, _, _, _ = np.linalg.lstsq(X_mat, y_adj, rcond=None)
+            X_w = X_mat * sqrt_w[:, None]
+            y_w = y_adj * sqrt_w
+            theta_hat, _, _, _ = np.linalg.lstsq(X_w, y_w, rcond=None)
             preds = base_vec + X_mat @ theta_hat
             residuals = y - preds
+            w_residuals = sqrt_w * residuals
+            obj_val = float(np.sum(w_residuals ** 2))
             dof = max(n_obs - k_params, 1)
-            sigma2 = float(np.sum(residuals ** 2) / dof)
-            cov = sigma2 * np.linalg.pinv(X_mat.T @ X_mat)
+            sigma2 = obj_val / dof
+            pinv_info = np.linalg.pinv(X_w.T @ X_w)
+            cov = sigma2 * pinv_info
             ses = np.sqrt(np.maximum(np.diag(cov), 0.0))
 
-            p_dict = {str(p): float(val) for p, val in zip(param_syms, theta_hat)}
-            se_dict = {str(p): float(se) for p, se in zip(param_syms, ses)}
+            id_rep = cls._analyze_identifiability(
+                X_w, param_names, pinv_info, n_obs, cond_threshold, corr_threshold
+            )
+            ci_dict = cls._confidence_intervals(param_names, theta_hat, ses, n_obs, k_params, confidence_level)
+            all_warnings = fit_warnings + list(id_rep.warnings)
+            p_dict = {nm: float(val) for nm, val in zip(param_names, theta_hat)}
+            se_dict = {nm: float(se) for nm, se in zip(param_names, ses)}
+            method_name = "WLS" if is_weighted else "OLS"
             return cls._build_fit_result(
-                cand_name, lhs_sym, rhs, p_dict, se_dict, y, preds, True, "Exact OLS fit.", clean_tol
+                cand_name, lhs_sym, rhs, p_dict, se_dict, y, preds, True,
+                f"Exact {method_name} fit.", clean_tol,
+                confidence_intervals=ci_dict, covariance_matrix=cov,
+                correlation_matrix=id_rep.correlation_matrix, identifiability=id_rep,
+                weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+                optimizer_config={"method": method_name, "loss": loss, "weighted": is_weighted, "missing_policy": missing_policy},
+                warnings=all_warnings,
             )
 
-        # Nonlinear Least Squares with analytic SymPy Jacobian & multi-start
+        # Nonlinear Least Squares (optionally weighted) with analytic SymPy Jacobian & multi-start
         all_syms = data_syms + list(param_syms)
         f_pred = sp.lambdify(all_syms, rhs, modules="numpy")
         jac_exprs = [sp.diff(rhs, p) for p in param_syms]
         f_jac = [sp.lambdify(all_syms, je, modules="numpy") for je in jac_exprs]
 
+        def _default_bound(p_name: str) -> Tuple[float, float]:
+            if tmpl_obj is not None:
+                return tmpl_obj.bound_for(p_name)
+            return (1e-9, np.inf) if p_name.startswith("gam_") else (-np.inf, np.inf)
+
         lb = np.array(
             [
-                bounds[str(p)][0]
-                if (bounds and str(p) in bounds)
-                else (1e-9 if str(p).startswith("gam_") else -np.inf)
-                for p in param_syms
+                bounds[nm][0] if (bounds and nm in bounds) else _default_bound(nm)[0]
+                for nm in param_names
             ],
             dtype=float,
         )
         ub = np.array(
-            [bounds[str(p)][1] if (bounds and str(p) in bounds) else np.inf for p in param_syms],
+            [
+                bounds[nm][1] if (bounds and nm in bounds) else _default_bound(nm)[1]
+                for nm in param_names
+            ],
             dtype=float,
         )
 
@@ -323,7 +586,7 @@ class NumericalSolver:
                 pred = np.broadcast_to(
                     np.asarray(f_pred(*x_arrays, *theta), dtype=float), (n_obs,)
                 )
-            res = pred - y
+            res = sqrt_w * (pred - y)
             if not np.all(np.isfinite(res)):
                 return np.full(n_obs, 1e12)
             return res
@@ -337,39 +600,38 @@ class NumericalSolver:
                     ).copy()
                     if not np.all(np.isfinite(c)):
                         c = np.nan_to_num(c, nan=0.0, posinf=1e6, neginf=-1e6)
-                    cols_j.append(c)
+                    cols_j.append(sqrt_w * c)
             return np.column_stack(cols_j)
 
         starts: List[np.ndarray] = []
         if initial_guess:
-            g0 = np.array([initial_guess.get(str(p), 1.0) for p in param_syms], dtype=float)
+            g0 = np.array([initial_guess.get(nm, 1.0) for nm in param_names], dtype=float)
             starts.append(np.clip(g0, lb + 1e-12, ub - 1e-12))
         else:
-            # Smart defaults: offsets near 0, gam_* positive, scaling kappas near 1, exponents near {-0.5, 0.5, 1.0}
             s1 = np.array(
                 [
                     0.0
-                    if str(p).endswith("_0")
-                    else (0.5 if str(p).startswith("nu_") else (0.2 if str(p).startswith("gam_") else 1.0))
-                    for p in param_syms
+                    if nm.endswith("_0")
+                    else (0.5 if nm.startswith("nu_") else (0.2 if nm.startswith("gam_") else 1.0))
+                    for nm in param_names
                 ],
                 dtype=float,
             )
             s2 = np.array(
                 [
                     0.0
-                    if str(p).endswith("_0")
-                    else (-0.5 if str(p).startswith("nu_") else (1.0 if str(p).startswith("gam_") else 0.5))
-                    for p in param_syms
+                    if nm.endswith("_0")
+                    else (-0.5 if nm.startswith("nu_") else (1.0 if nm.startswith("gam_") else 0.5))
+                    for nm in param_names
                 ],
                 dtype=float,
             )
             s3 = np.array(
                 [
                     0.0
-                    if str(p).endswith("_0")
-                    else (1.5 if str(p).startswith("nu_") else (0.05 if str(p).startswith("gam_") else 1.0))
-                    for p in param_syms
+                    if nm.endswith("_0")
+                    else (1.5 if nm.startswith("nu_") else (0.05 if nm.startswith("gam_") else 1.0))
+                    for nm in param_names
                 ],
                 dtype=float,
             )
@@ -400,25 +662,40 @@ class NumericalSolver:
             np.asarray(f_pred(*x_arrays, *theta_hat), dtype=float), (n_obs,)
         ).copy()
         residuals = y - preds
+        w_residuals = sqrt_w * residuals
+        obj_val = float(np.sum(w_residuals ** 2))
         dof = max(n_obs - k_params, 1)
-        sigma2 = float(np.sum(residuals ** 2) / dof)
-        J = best_opt.jac
-        cov = sigma2 * np.linalg.pinv(J.T @ J)
+        sigma2 = obj_val / dof
+        J_w = best_opt.jac
+        pinv_info = np.linalg.pinv(J_w.T @ J_w)
+        cov = sigma2 * pinv_info
         ses = np.sqrt(np.maximum(np.diag(cov), 0.0))
 
-        p_dict = {str(p): float(val) for p, val in zip(param_syms, theta_hat)}
-        se_dict = {str(p): float(se) for p, se in zip(param_syms, ses)}
+        id_rep = cls._analyze_identifiability(
+            J_w, param_names, pinv_info, n_obs, cond_threshold, corr_threshold
+        )
+        ci_dict = cls._confidence_intervals(param_names, theta_hat, ses, n_obs, k_params, confidence_level)
+        all_warnings = fit_warnings + list(id_rep.warnings)
+        if not best_opt.success:
+            all_warnings.append(f"Optimizer did not converge: {best_opt.message}")
+
+        p_dict = {nm: float(val) for nm, val in zip(param_names, theta_hat)}
+        se_dict = {nm: float(se) for nm, se in zip(param_names, ses)}
+        method_name = "WNLLS" if is_weighted else "NLLS"
         return cls._build_fit_result(
-            cand_name,
-            lhs_sym,
-            rhs,
-            p_dict,
-            se_dict,
-            y,
-            preds,
-            bool(best_opt.success),
-            best_opt.message,
-            clean_tol,
+            cand_name, lhs_sym, rhs, p_dict, se_dict, y, preds,
+            bool(best_opt.success), best_opt.message, clean_tol,
+            confidence_intervals=ci_dict, covariance_matrix=cov,
+            correlation_matrix=id_rep.correlation_matrix, identifiability=id_rep,
+            weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+            optimizer_config={
+                "method": method_name,
+                "loss": loss,
+                "weighted": is_weighted,
+                "n_starts": len(starts),
+                "missing_policy": missing_policy,
+            },
+            warnings=all_warnings,
         )
 
     @classmethod
@@ -451,22 +728,17 @@ class NumericalSolver:
         return cls.fit(eq_for_fit, aug_data, target_col=rate_col, free_params=free_in_diff)
 
     @classmethod
-    def rank_candidates(
+    def rank_candidates_report(
         cls,
         result: DerivationResult,
         data: Mapping[str, Union[float, Sequence[float], np.ndarray]],
         target_col: Optional[str] = None,
         criterion: str = "bic",
-    ) -> List[FitResult]:
-        """Fit all candidate equations in a DerivationResult and rank by BIC, AIC, or RMSE."""
-        fits: List[FitResult] = []
-        for cand in result.candidates:
-            try:
-                fr = cls.fit(cand, data, target_col=target_col)
-                fits.append(fr)
-            except Exception:
-                continue
-
+        weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+        sigma_y: Optional[Union[Sequence[float], np.ndarray]] = None,
+        missing_policy: str = "raise",
+    ) -> CandidateRankingReport:
+        """Fit all candidate equations, capture rejection reasons, and categorize results."""
         key_map = {
             "bic": lambda r: r.bic,
             "aic": lambda r: r.aic,
@@ -475,11 +747,86 @@ class NumericalSolver:
         }
         if criterion not in key_map:
             raise ValueError(f"Unsupported ranking criterion '{criterion}'. Choose from {list(key_map)}.")
+
+        fits: List[FitResult] = []
+        rejected: List[RejectedCandidate] = [
+            RejectedCandidate(
+                candidate_name=item.get("name", "unknown"),
+                reason=item.get("reason", "Rejected during symbolic formulation."),
+                stage="symbolic",
+            )
+            for item in getattr(result, "rejected_candidates", [])
+        ]
+        mathematically_admissible = [
+            c.name for c in result.candidates if getattr(c, "dimensionally_consistent", True)
+        ]
+
+        for cand in result.candidates:
+            try:
+                fr = cls.fit(
+                    cand,
+                    data,
+                    target_col=target_col,
+                    weights=weights,
+                    sigma_y=sigma_y,
+                    missing_policy=missing_policy,
+                )
+                fits.append(fr)
+            except Exception as exc:
+                rejected.append(
+                    RejectedCandidate(
+                        candidate_name=cand.name,
+                        reason=f"{type(exc).__name__}: {exc}",
+                        stage="fitting",
+                    )
+                )
+
         fits.sort(key=key_map[criterion])
-        return fits
+        categories = {
+            "mathematically_admissible": mathematically_admissible,
+            "statistically_supported": [
+                fr.candidate_name
+                for fr in fits
+                if fr.converged and (fr.identifiability is None or fr.identifiability.identifiable)
+            ],
+            "identifiability_flagged": [
+                fr.candidate_name
+                for fr in fits
+                if fr.identifiability is not None and not fr.identifiability.identifiable
+            ],
+            "rejected": [r.candidate_name for r in rejected],
+        }
+        return CandidateRankingReport(
+            ranked=fits,
+            rejected=rejected,
+            criterion=criterion,
+            categories=categories,
+        )
 
     @classmethod
-    def select_sparse_pi(
+    def rank_candidates(
+        cls,
+        result: DerivationResult,
+        data: Mapping[str, Union[float, Sequence[float], np.ndarray]],
+        target_col: Optional[str] = None,
+        criterion: str = "bic",
+        weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+        sigma_y: Optional[Union[Sequence[float], np.ndarray]] = None,
+        missing_policy: str = "raise",
+    ) -> List[FitResult]:
+        """Fit all candidate equations in a DerivationResult and rank by BIC, AIC, or RMSE."""
+        return cls.rank_candidates_report(
+            result,
+            data,
+            target_col=target_col,
+            criterion=criterion,
+            weights=weights,
+            sigma_y=sigma_y,
+            missing_policy=missing_policy,
+        ).ranked
+
+    @classmethod
+    def select_sparse_pi_report(
         cls,
         result: DerivationResult,
         data: Mapping[str, Union[float, Sequence[float], np.ndarray]],
@@ -487,13 +834,30 @@ class NumericalSolver:
         max_groups: int = 2,
         form: str = "power",
         criterion: str = "bic",
-    ) -> List[FitResult]:
+        weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+        sigma_y: Optional[Union[Sequence[float], np.ndarray]] = None,
+        missing_policy: str = "raise",
+    ) -> CandidateRankingReport:
         """
-        Sparse Buckingham-Pi subset selection for high-nullity multi-physics systems.
+        Sparse Buckingham-Pi subset selection via `TEMPLATE_REGISTRY`, returning ranked fits
+        alongside explicit rejection diagnostics and admissibility categories.
+        """
+        key_map = {
+            "bic": lambda r: r.bic,
+            "aic": lambda r: r.aic,
+            "rmse": lambda r: r.rmse,
+            "r2": lambda r: -r.r2,
+        }
+        if criterion not in key_map:
+            raise ValueError(f"Unsupported ranking criterion '{criterion}'. Choose from {list(key_map)}.")
 
-        Evaluates Pi-subsets of cardinality 0..max_groups (using 'power', 'hill', or 'exp_sat'
-        modulation) and ranks parsimonious laws by BIC/AIC/RMSE to prevent collinearity.
-        """
+        try:
+            tmpl = TEMPLATE_REGISTRY.get(form)
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported form '{form}'; choose from {TEMPLATE_REGISTRY.names()}."
+            ) from exc
+
         all_pis: List[sp.Expr] = []
         for pis in result.pi_groups.values():
             for p in pis:
@@ -513,28 +877,11 @@ class NumericalSolver:
 
         for r in range(1, cap + 1):
             for idxs in combinations(range(m), r):
-                mod_factor = sp.Integer(1)
-                extra_params: List[sp.Symbol] = []
                 label_parts = [f"Pi{i + 1}" for i in idxs]
-                for i in idxs:
-                    pi_e = all_pis[i]
-                    nu_s = sp.Symbol(f"nu_{i + 1}", real=True)
-                    if form == "power":
-                        mod_factor *= pi_e ** nu_s
-                        extra_params.append(nu_s)
-                    elif form == "hill":
-                        gam_s = sp.Symbol(f"gam_{i + 1}", positive=True, real=True)
-                        scaled = gam_s * (pi_e ** nu_s)
-                        mod_factor *= scaled / (sp.Integer(1) + scaled)
-                        extra_params.extend([gam_s, nu_s])
-                    elif form == "exp_sat":
-                        gam_s = sp.Symbol(f"gam_{i + 1}", positive=True, real=True)
-                        scaled = gam_s * (pi_e ** nu_s)
-                        mod_factor *= sp.Integer(1) - sp.exp(-scaled)
-                        extra_params.extend([gam_s, nu_s])
-                    else:
-                        raise ValueError(f"Unsupported form '{form}'; choose 'power', 'hill', or 'exp_sat'.")
-
+                selected_pis = [all_pis[i] for i in idxs]
+                mod_factor, extra_params = tmpl.build_factor(
+                    selected_pis, indices=[i + 1 for i in idxs]
+                )
                 rhs = offset_expr + core_expr * mod_factor
                 eq = sp.Eq(lhs_sym, rhs)
                 free_p = [p for p in (list(base_cand.free_params) + extra_params) if rhs.has(p)]
@@ -545,26 +892,91 @@ class NumericalSolver:
                         equation=eq,
                         rhs=rhs,
                         free_params=free_p,
-                        pi_groups=[all_pis[i] for i in idxs],
+                        pi_groups=selected_pis,
                         is_exact_state=base_cand.is_exact_state,
+                        dimensionally_consistent=getattr(base_cand, "dimensionally_consistent", True),
+                        assumptions=list(tmpl.assumptions),
+                        template_name=tmpl.name,
                     )
                 )
 
         fits: List[FitResult] = []
+        rejected: List[RejectedCandidate] = []
         for cand in subset_cands:
             try:
-                fits.append(cls.fit(cand, data, target_col=target_col))
-            except Exception:
-                continue
+                fits.append(
+                    cls.fit(
+                        cand,
+                        data,
+                        target_col=target_col,
+                        weights=weights,
+                        sigma_y=sigma_y,
+                        missing_policy=missing_policy,
+                    )
+                )
+            except Exception as exc:
+                rejected.append(
+                    RejectedCandidate(
+                        candidate_name=cand.name,
+                        reason=f"{type(exc).__name__}: {exc}",
+                        stage="fitting",
+                    )
+                )
 
-        key_map = {
-            "bic": lambda r: r.bic,
-            "aic": lambda r: r.aic,
-            "rmse": lambda r: r.rmse,
-            "r2": lambda r: -r.r2,
-        }
         fits.sort(key=key_map[criterion])
-        return fits
+        categories = {
+            "mathematically_admissible": [
+                c.name for c in subset_cands if getattr(c, "dimensionally_consistent", True)
+            ],
+            "statistically_supported": [
+                fr.candidate_name
+                for fr in fits
+                if fr.converged and (fr.identifiability is None or fr.identifiability.identifiable)
+            ],
+            "identifiability_flagged": [
+                fr.candidate_name
+                for fr in fits
+                if fr.identifiability is not None and not fr.identifiability.identifiable
+            ],
+            "rejected": [r.candidate_name for r in rejected],
+        }
+        return CandidateRankingReport(
+            ranked=fits,
+            rejected=rejected,
+            criterion=criterion,
+            categories=categories,
+        )
+
+    @classmethod
+    def select_sparse_pi(
+        cls,
+        result: DerivationResult,
+        data: Mapping[str, Union[float, Sequence[float], np.ndarray]],
+        target_col: Optional[str] = None,
+        max_groups: int = 2,
+        form: str = "power",
+        criterion: str = "bic",
+        weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+        sigma_y: Optional[Union[Sequence[float], np.ndarray]] = None,
+        missing_policy: str = "raise",
+    ) -> List[FitResult]:
+        """
+        Sparse Buckingham-Pi subset selection for high-nullity multi-physics systems.
+
+        Evaluates Pi-subsets of cardinality 0..max_groups (using any registered template in
+        `TEMPLATE_REGISTRY`) and ranks parsimonious laws by BIC/AIC/RMSE to prevent collinearity.
+        """
+        return cls.select_sparse_pi_report(
+            result,
+            data,
+            target_col=target_col,
+            max_groups=max_groups,
+            form=form,
+            criterion=criterion,
+            weights=weights,
+            sigma_y=sigma_y,
+            missing_policy=missing_policy,
+        ).ranked
 
     @classmethod
     def integrate_hybrid_ode(
@@ -830,6 +1242,16 @@ class NumericalSolver:
         converged: bool,
         message: str,
         clean_tol: float,
+        *,
+        confidence_intervals: Optional[Dict[str, Tuple[float, float]]] = None,
+        covariance_matrix: Optional[np.ndarray] = None,
+        correlation_matrix: Optional[np.ndarray] = None,
+        identifiability: Optional[IdentifiabilityReport] = None,
+        weighted: bool = False,
+        objective_value: Optional[float] = None,
+        n_dropped_missing: int = 0,
+        optimizer_config: Optional[Dict[str, Any]] = None,
+        warnings: Optional[List[str]] = None,
     ) -> FitResult:
         n_obs = y.size
         k = len(p_dict)
@@ -860,6 +1282,13 @@ class NumericalSolver:
         cal_rhs = sp.simplify(rhs.subs(subs_cal))
         cal_eq = sp.Eq(lhs_sym, cal_rhs)
 
+        if not converged:
+            tier = "fit_failed"
+        elif identifiability is not None and not identifiability.identifiable:
+            tier = "identifiability_warning"
+        else:
+            tier = "statistically_supported"
+
         return FitResult(
             candidate_name=cand_name,
             params=p_dict,
@@ -875,4 +1304,14 @@ class NumericalSolver:
             residuals=residuals,
             converged=converged,
             message=message,
+            confidence_intervals=dict(confidence_intervals or {}),
+            covariance_matrix=covariance_matrix,
+            correlation_matrix=correlation_matrix,
+            identifiability=identifiability,
+            weighted=weighted,
+            objective_value=sse if objective_value is None else objective_value,
+            n_dropped_missing=n_dropped_missing,
+            optimizer_config=dict(optimizer_config or {}),
+            warnings=list(warnings or []),
+            admissibility_tier=tier,
         )

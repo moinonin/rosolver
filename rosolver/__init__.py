@@ -12,10 +12,13 @@ from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
 from .integrators import FixedStepResult, integrate_fixed, max_stable_dt, stability_function
 from .numerical import (
+    CandidateRankingReport,
     FitResult,
     HybridODESolution,
+    IdentifiabilityReport,
     NumericalSolver,
     ODESolution,
+    RejectedCandidate,
     SheddingEventSpec,
     SheddingRecord,
 )
@@ -43,6 +46,14 @@ from .simulate import (
 )
 from .symbolic import CandidateEquation, DerivationResult, DerivationStep, SymbolicSolver
 from .system import RateIdentity, RelationSpec, System, Variable
+from .templates import (
+    TEMPLATE_REGISTRY,
+    EquationTemplate,
+    TemplateRegistry,
+    get_template,
+    list_templates,
+    register_template,
+)
 from .verify import (
     CoSimulationReport,
     ConservationAuditReport,
@@ -76,6 +87,7 @@ def formulate(
     zero_initials: bool = False,
     unit_constants: bool = False,
     include_saturating: bool = False,
+    templates: Optional[Sequence[str]] = None,
 ) -> DerivationResult:
     """
     One-call convenience API to formulate symbolic equation(s) from qualitative relations.
@@ -99,12 +111,14 @@ def formulate(
         zero_initials=zero_initials,
         unit_constants=unit_constants,
         include_saturating=include_saturating,
+        templates=templates,
     )
 
 
 __all__ = [
     "BC",
     "CandidateEquation",
+    "CandidateRankingReport",
     "CoSimulationReport",
     "ConservationAuditReport",
     "ConservationLaw1D",
@@ -113,12 +127,14 @@ __all__ = [
     "Dimension",
     "DimensionalEngine",
     "DimensionalSolution",
+    "EquationTemplate",
     "FieldConservationEntry",
     "FitResult",
     "FixedStepResult",
     "GCIReport",
     "HybridODESolution",
     "HybridStefanSolution",
+    "IdentifiabilityReport",
     "MMSReport",
     "NumericalSolver",
     "ODESolution",
@@ -126,6 +142,7 @@ __all__ = [
     "PDESolution",
     "PartitionedCouplingReport",
     "RateIdentity",
+    "RejectedCandidate",
     "RelationSpec",
     "SheddingEventSpec",
     "SheddingRecord",
@@ -135,6 +152,8 @@ __all__ = [
     "StefanSolution",
     "SymbolicSolver",
     "System",
+    "TEMPLATE_REGISTRY",
+    "TemplateRegistry",
     "TimestepReport",
     "Trajectory",
     "Variable",
@@ -147,8 +166,10 @@ __all__ = [
     "cosimulate_coupled_odes",
     "formulate",
     "gci_from_values",
+    "get_template",
     "grid_convergence_study",
     "integrate_fixed",
+    "list_templates",
     "max_stable_dt",
     "mms_study",
     "neumann_lambda",
@@ -160,6 +181,7 @@ __all__ = [
     "plot_simulation",
     "plot_stability_spectrum",
     "plot_stefan",
+    "register_template",
     "simulate",
     "simulate_and_plot",
     "solve_partitioned_fixed_point",
