@@ -468,3 +468,44 @@ def plot_stability_spectrum(
     ax.grid(alpha=0.3)
     ax.legend(frameon=False, fontsize=8)
     return _finish(fig, path, show)
+
+
+def plot_validation(
+    report,
+    path: Optional[Union[str, Path]] = None,
+    x_label: Optional[str] = None,
+    show: bool = False,
+) -> Optional[Path]:
+    """Plot simulation predictions vs. experimental measurements and validation error band."""
+    plt = _pyplot()
+    pts = report.points
+    has_coord = all(p.coordinate is not None for p in pts)
+    xs = np.array([p.coordinate if has_coord else i for i, p in enumerate(pts)], dtype=float)
+    sims = np.array([p.simulation for p in pts], dtype=float)
+    exps = np.array([p.experiment for p in pts], dtype=float)
+    errs = np.array([p.error for p in pts], dtype=float)
+    u_exps = np.array([p.u_exp or 0.0 for p in pts], dtype=float)
+    u_vals = np.array([p.u_val if p.u_val is not None else np.nan for p in pts], dtype=float)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7.4, 6.2), sharex=True)
+    ax1.plot(xs, sims, "o-", lw=2.0, label="Simulation (S)")
+    if np.any(u_exps > 0.0):
+        ax1.errorbar(xs, exps, yerr=u_exps, fmt="s", color="black", capsize=3, label="Experiment (D ± u_exp)")
+    else:
+        ax1.scatter(xs, exps, marker="s", color="black", zorder=3, label="Experiment (D)")
+    ax1.set_ylabel(f"{report.field} ({report.unit})" if report.unit else report.field)
+    ax1.set_title(f"Model Validation: {report.study_name} [{report.status.value}]")
+    ax1.grid(alpha=0.3)
+    ax1.legend(frameon=False, fontsize=8)
+
+    ax2.axhline(0.0, color="black", lw=0.9, ls=":")
+    ax2.plot(xs, errs, "o-", color="tab:red", lw=1.6, label="E = S - D")
+    if np.all(np.isfinite(u_vals)):
+        band = report.coverage_factor * u_vals
+        ax2.fill_between(xs, -band, band, color="tab:green", alpha=0.18,
+                         label=f"±{report.coverage_factor:g} u_val")
+    ax2.set_xlabel(x_label or ("Coordinate" if has_coord else "Validation point"))
+    ax2.set_ylabel("Validation error E")
+    ax2.grid(alpha=0.3)
+    ax2.legend(frameon=False, fontsize=8)
+    return _finish(fig, path, show)

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Optional, Sequence, Tuple, Union
 
+from .data import Dataset
 from .dimensions import Dimension, DimensionalEngine, DimensionalSolution
+from .integrations import GenericCSVAdapter, SciPyAdapter, SolverAdapter, VerificationStudy
 from .integrators import FixedStepResult, integrate_fixed, max_stable_dt, stability_function
 from .model import (
     ConditionSpec,
@@ -61,6 +63,7 @@ from .simulate import (
     plot_simulation,
     plot_stability_spectrum,
     plot_stefan,
+    plot_validation,
     simulate,
     simulate_and_plot,
 )
@@ -74,6 +77,7 @@ from .templates import (
     list_templates,
     register_template,
 )
+from .validation import ValidationPoint, ValidationReport, ValidationStudy
 from .verify import (
     CoSimulationReport,
     ConservationAuditReport,
@@ -143,6 +147,7 @@ __all__ = [
     "ConditionSpec",
     "ConservationAuditReport",
     "ConservationLaw1D",
+    "Dataset",
     "DatasetRef",
     "DerivationResult",
     "DerivationStep",
@@ -157,6 +162,7 @@ __all__ = [
     "FitResult",
     "FixedStepResult",
     "GCIReport",
+    "GenericCSVAdapter",
     "HybridODESolution",
     "HybridStefanSolution",
     "IdentifiabilityReport",
@@ -179,9 +185,11 @@ __all__ = [
     "RelationSpec",
     "ResultMetadata",
     "ResultMixin",
+    "SciPyAdapter",
     "SheddingEventSpec",
     "SheddingRecord",
     "SimulationResult",
+    "SolverAdapter",
     "StandardResult",
     "StiffnessReport",
     "Stefan1D",
@@ -192,9 +200,13 @@ __all__ = [
     "TemplateRegistry",
     "TimestepReport",
     "Trajectory",
+    "ValidationPoint",
+    "ValidationReport",
+    "ValidationStudy",
     "Variable",
     "VariableSpec",
     "VerificationStatus",
+    "VerificationStudy",
     "analyze_stiffness",
     "audit_hybrid_conservation",
     "audit_ode_invariants",
@@ -219,6 +231,7 @@ __all__ = [
     "plot_simulation",
     "plot_stability_spectrum",
     "plot_stefan",
+    "plot_validation",
     "register_template",
     "sha256_file",
     "simulate",

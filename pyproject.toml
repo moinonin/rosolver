@@ -31,6 +31,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+io = [
+    "h5py>=3.10",
+    "pandas>=2.0",
+]
 
 [project.scripts]
 rosolver = "rosolver.cli:main"
