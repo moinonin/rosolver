@@ -1,11 +1,11 @@
 # `rosolver`
 
-**Symbolic Equation Discovery, Numerical Calibration & ASME V&V 20 Verification Suite.**
+**Symbolic Equation Discovery, Numerical Calibration & Verification Suite (Roache GCI / Celik 2008 / MMS).**
 
-`rosolver` generalizes first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](ch1.tex)) into a domain-agnostic scientific modeling and verification engine for students, engineers, and researchers:
+`rosolver` generalizes first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](docs/refs/ch1.tex)) into a domain-agnostic scientific modeling and verification engine for students, engineers, and researchers:
 
 1. **Symbolic & Numerical Discovery**: Declare qualitative factor dependencies (`g = fn(a, b, c)`, `b = fn(f; grav)`) and optional dimensions; `rosolver` derives closed-form laws $g(f)$, extracts Buckingham-$\Pi$ groups (monomial, affine, saturating Hill, and Rosin–Rammler templates), enforces Clairaut exactness, calibrates constants/exponents via OLS & analytic-Jacobian NLLS, ranks models by BIC, and auto-simulates/plots curves.
-2. **Generic PDE, ODE & Verification Suite (`rosolver.verify`, `rosolver.pde`, `rosolver.odesys`)**: Verify any internal or external numerical model via **Method of Manufactured Solutions (MMS)**, **Roache Grid Convergence Index (GCI)** (including Celik non-uniform refinement iteration), **fixed-step time-step sensitivity**, **symbolic & machine-precision conservation audits**, and **Jacobian stiffness + Aitken $\Delta^2$ partitioned coupling stability checks**.
+2. **Generic PDE, ODE & Verification Suite (`rosolver.verify`, `rosolver.pde`, `rosolver.odesys`)**: Verify any internal or external numerical model via **Method of Manufactured Solutions (MMS)**, **Roache Grid Convergence Index (GCI)** (including Celik non-uniform refinement iteration), **fixed-step time-step sensitivity**, **symbolic & machine-precision conservation audits**, and **Jacobian stiffness + Aitken $\Delta^2$ partitioned coupling stability checks**. These tools are inspired by ASME V&V 20 principles and do not by themselves constitute formal standards certification.
 
 ---
 
@@ -34,7 +34,10 @@ python -m examples.auto_simulate
 # Generic multi-domain V&V showcase (MMS, GCI, FVM conservation, stiffness, Aitken co-sim)
 python -m examples.verification_suite
 
-# Run full test suite (39 tests)
+# Stefan moving-boundary validation + rime/glaze figure
+python -m examples.stefan_validation
+
+# Run full test & benchmark suite
 pytest -v
 ```
 
@@ -141,9 +144,70 @@ rosolver --rel "K = fn(m, v)" --dim K="M*L^2/T^2" --dim m=M --dim v="L/T" \
   --target K --zero-initials --sweep v=0:30:200 --set kappa_K=0.5 --family m=1,5,10 \
   --plot figures/kinetic.png
 
-# Standalone ASME V&V 20 GCI check on external CFD/FEM mesh study numbers
+# Standalone Roache/Celik GCI check on external CFD/FEM mesh study numbers
 rosolver --gci "0.01,0.02,0.04:1.9572,1.9480,1.9112" --formal-order 2 --gci-plot figures/gci.png
 ```
+
+### F. Moving-Boundary (Stefan) Ice Growth
+```python
+from rosolver import Stefan1D, plot_stefan
+
+# 1. Exact self-similar validation (h_c = 0): delta = 2*lambda*sqrt(alpha*t)
+st = Stefan1D(T_wall=-6.0, T_f=0.0, h_c=0.0, n_xi=200)
+sol = st.solve(3600.0, delta0=1e-5)
+print(sol.delta[-1], float(st.neumann_delta(3600.0)))   # agree to ~1e-7
+
+# 2. Convective surface with SnowTek/WINICE numbers (h_c in the Stefan flux jump)
+st = Stefan1D(T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0)
+sol = st.solve(86400.0, delta0=1e-5)
+y, T = sol.profile()          # physical depth and ice temperature profile
+print(sol.summary(), st.quasi_steady_delta(86400.0, 1e-5))
+```
+`Stefan1D` removes the front with the Landau transform `xi = y/delta(t)`, turns
+`delta(t)` into an ODE state, and integrates with stiff `BDF`/`Radau` (or fixed-step
+`beuler`/`cn`). The Stefan condition is enforced exactly — no latent-heat smearing.
+
+Rime/glaze coupling: pass `mdot_imp` (impingement flux). The solver then switches between
+the supply-limited **dry** branch (`T_s < T_f`, `ddelta/dt = mdot_imp/rho`, no runback) and
+the energy-limited **wet** branch (`T_s = T_f`, Stefan rate, excess runs back):
+
+```python
+st = Stefan1D(T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0, mdot_imp=3e-3)
+sol = st.solve(6 * 3600.0, delta0=1e-5)
+print(sol.branch[-1], sol.runback(-1))          # 'wet', kg/m^2/s
+plot_stefan(sol, st, path="figures/stefan_front_validation.png", show_surface=True)
+```
+
+Runback film + impingement enthalpy: pass `tau_drain` (drainage time), `cp_imp`,
+`T_imp`, `V_imp`, `mdot_evap`. The film thickness `h_f` becomes an ODE state and the
+wet/dry switch is chosen by energy (`mdot_imp*Lf > q_cap`), so `T_s` stays continuous
+as the film drains to zero:
+
+```python
+from rosolver import Stefan1D, plot_stefan
+
+st = Stefan1D(T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0,
+              mdot_imp=6e-3, cp_imp=4186.0, V_imp=30.0, tau_drain=30.0)
+sol = st.solve(2 * 3600.0, delta0=1e-5)
+print(sol.film[-1], sol.freezing_fraction(), sol.mdot_out[-1])
+plot_stefan(sol, st, show_film=True, path="figures/stefan_film.png")
+```
+
+Hybrid accretion/shedding: reuse `SheddingEventSpec` on the front position. Events fire
+when `delta` crosses `delta_crit`, reset the ice thickness, and restart the integration:
+
+```python
+from rosolver import Stefan1D, stefan_shedding_event
+
+st = Stefan1D(T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0, mdot_imp=3e-3)
+hyb = st.solve_with_shedding(
+    [stefan_shedding_event(delta_crit=0.01, shed_fraction=0.8)],
+    12 * 3600.0, delta0=1e-5,
+)
+print(hyb.summary())                            # lists every shedding event
+```
+
+See [docs/notes/stefan_front_tracking_notes.pdf](docs/notes/stefan_front_tracking_notes.pdf) for the full derivation.
 
 ---
 
@@ -159,16 +223,18 @@ rosolver/
 │   ├── integrators.py      # Fixed-step RK/implicit integrators & stability functions R(z)
 │   ├── odesys.py           # Symbolic multi-state ODE systems, Jacobians & Lie invariants
 │   ├── pde.py              # 1D conservative FVM balance-law solver with flux/source ledger
+│   ├── phasechange.py      # Front-fixing Stefan solver: wet/dry, runback film, shedding
 │   ├── verify.py           # GCI, MMS, dt sensitivity, conservation audits & Aitken coupling
 │   ├── simulate.py         # Parameter sweeps, curve families & V&V plotting helpers
 │   └── cli.py              # CLI entry point (`rosolver` / `python -m rosolver`)
 ├── examples/
 │   ├── ch1_reproductions.py        # ch1.tex & multi-domain worked derivations
-│   ├── icing_turbomachinery.py     # 6 turbomachinery ice accretion & shedding cases
+│   ├── icing_turbomachinery.py     # 8 turbomachinery ice accretion & shedding cases
+│   ├── stefan_validation.py        # Stefan front vs Neumann + rime/glaze figure
 │   ├── auto_simulate.py            # Auto-simulation & plotting showcase
 │   └── verification_suite.py       # Generic multi-domain V&V & coupling stability showcase
-├── tests/                  # 39 unit & integration tests
-└── docs/                   # Compiled LaTeX lecture & reference notes (PDF + TeX)
+├── tests/                  # Unit, integration, security & scientific benchmark tests
+└── docs/                   # Architecture specs, LaTeX lecture notes & reference material
 ```
 
 ## License

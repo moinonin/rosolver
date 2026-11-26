@@ -325,6 +325,117 @@ def plot_conservation_audit(
     return _finish(fig, path, show)
 
 
+def plot_stefan(
+    sol,
+    model=None,
+    path: Optional[Union[str, Path]] = None,
+    show: bool = False,
+    *,
+    neumann: bool = True,
+    quasi: bool = True,
+    show_surface: bool = False,
+    show_film: bool = False,
+    show_events: bool = True,
+    ax=None,
+    time_scale: float = 3600.0,
+    time_unit: str = "h",
+    length_scale: float = 1e3,
+    length_unit: str = "mm",
+) -> Optional[Path]:
+    """
+    Plot a `StefanSolution` front delta(t) against the Neumann and quasi-steady references.
+
+    If `ax` is given the panel is drawn into it (the caller owns the figure and no file is
+    written); otherwise a new figure is created and saved to `path`. `model` is a `Stefan1D`
+    used for the reference curves; it can be omitted when only delta(t) is wanted. Discrete
+    shedding events and the Messinger film thickness are drawn when present/requested.
+    """
+    plt = _pyplot()
+    own = ax is None
+    if own:
+        fig, ax = plt.subplots(figsize=(7.4, 4.5))
+    else:
+        fig = ax.figure
+
+    t = np.asarray(sol.t, dtype=float)
+    t_plot = t / time_scale
+    ax.plot(t_plot, np.asarray(sol.delta) * length_scale, color="tab:blue", lw=2.4,
+            label="front-fixed PDE")
+
+    if model is not None:
+        if neumann and abs(float(getattr(model, "h_c", 0.0))) < 1e-12:
+            try:
+                ax.plot(t_plot, model.neumann_delta(t) * length_scale, "k--", lw=1.6,
+                        label="Neumann (exact, $h_c=0$)")
+            except (ValueError, RuntimeError):
+                pass
+        if quasi:
+            ax.plot(t_plot, model.quasi_steady_delta(t, float(sol.delta[0])) * length_scale,
+                    color="tab:orange", ls=":", lw=1.8, label="quasi-steady ($Ste\\to0$)")
+
+    # Shade wet/dry regimes when a finite water supply is present.
+    branch = getattr(sol, "branch", None)
+    if branch is not None and getattr(sol, "mdot_imp", None) is not None:
+        arr = np.asarray(branch)
+        colors = {"dry": ("tab:cyan", 0.10), "wet": ("tab:red", 0.07)}
+        i = 0
+        seen = set()
+        while i < arr.size:
+            j = i
+            while j + 1 < arr.size and arr[j + 1] == arr[i]:
+                j += 1
+            color, alpha = colors.get(str(arr[i]), ("gray", 0.08))
+            ax.axvspan(t_plot[i], t_plot[j], color=color, alpha=alpha, lw=0,
+                       label=None if str(arr[i]) in seen else f"{arr[i]} branch")
+            seen.add(str(arr[i]))
+            i = j + 1
+
+    # Discrete shedding resets (HybridStefanSolution).
+    events = getattr(sol, "events", None)
+    if show_events and events:
+        ev_t = np.asarray([ev.time for ev in events], dtype=float) / time_scale
+        ev_post = np.asarray([ev.post_value for ev in events], dtype=float) * length_scale
+        ax.vlines(ev_t, 0.0, ev_post, color="crimson", ls=":", lw=1.0, alpha=0.75,
+                  label="shedding reset")
+        ax.plot(ev_t, ev_post, "v", color="crimson", ms=4.0)
+
+    ax.set_xlabel(f"t [{time_unit}]")
+    ax.set_ylabel(f"$\\delta$ [{length_unit}]")
+    ax.grid(alpha=0.3)
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    if getattr(sol, "mdot_imp", None) is not None:
+        ax.set_title(
+            f"Stefan ice growth with impingement ({sol.mdot_imp * 1e3:.2f} g/m$^2$/s)"
+        )
+    else:
+        ax.set_title("Stefan ice growth")
+
+    has_surface = show_surface and getattr(sol, "mdot_imp", None) is not None
+    has_film = show_film and getattr(sol, "film", None) is not None
+    if has_surface or has_film:
+        ax2 = ax.twinx()
+        if has_surface:
+            ts = np.asarray(sol.T_s, dtype=float)
+            ax2.plot(t_plot, ts, color="tab:green", lw=1.4, alpha=0.85, label="$T_s$")
+            pad = 0.08 * max(float(ts.max() - ts.min()), 1e-6)
+            ax2.set_ylim(float(ts.min()) - pad, float(ts.max()) + pad)
+        if has_film:
+            ax2.plot(t_plot, np.asarray(sol.film) * 1e3, color="tab:purple", lw=1.6,
+                     label="$h_f$ [mm]")
+        labels = []
+        if has_surface:
+            labels.append("$T_s$ [C]")
+        if has_film:
+            labels.append("$h_f$ [mm]")
+        ax2.set_ylabel(" / ".join(labels), color="tab:green" if has_surface else "tab:purple")
+        ax2.tick_params(axis="y", colors="tab:green" if has_surface else "tab:purple")
+        ax2.legend(frameon=False, fontsize=8, loc="lower right")
+
+    if own:
+        return _finish(fig, path, show)
+    return None
+
+
 def plot_stability_spectrum(
     stiffness_report,
     dt: float,

@@ -8,6 +8,8 @@ Grounded directly in extracted physics and experimental benchmarks from the 'Aca
   4. Nested Rotor Accretion -> Centrifugal & Aerodynamic Interfacial Stress DAG (OTI Slide 04 / Cross 2024)
   5. Irwin-Griffith Cohesive Fracture & WINICE Occluded-Liquid Defect Scaling (K_I >= K_Ic)
   6. Hybrid Event-Driven Multi-Cycle Shedding Diagnostic: 40s Cohesive Chunks vs. 90s Interfacial Slab
+  7. Front-Fixing Stefan Moving Boundary: exact Neumann validation + wet/dry switch
+  8. Coupled Stefan Solver: runback-film Messinger closure + hybrid shedding events
 
 Run with:
     python -m examples.icing_turbomachinery
@@ -21,7 +23,9 @@ import sympy as sp
 from rosolver import (
     NumericalSolver,
     SheddingEventSpec,
+    Stefan1D,
     SymbolicSolver,
+    stefan_shedding_event,
     System,
     formulate,
 )
@@ -314,10 +318,75 @@ def case6_hybrid_shedding_curveball_diagnostic() -> None:
         )
 
 
+def case7_stefan_front_tracking() -> None:
+    print("\n" + "=" * 78)
+    print("CASE 7: Stefan Moving-Boundary Ice Growth (eq. 3.4) — Front-Fixing PDE")
+    print("        Exact Neumann validation + convective (h_c) branch")
+    print("=" * 78)
+
+    # (a) h_c = 0: the full PDE must reproduce the self-similar Neumann front.
+    st_exact = Stefan1D(k_eff=2.22, rho=917.0, cp=2100.0, Lf=3.34e5,
+                        T_wall=-6.0, T_f=0.0, h_c=0.0, n_xi=200)
+    sol_exact = st_exact.solve(3600.0, delta0=1e-5, n_out=20)
+    exact = float(st_exact.neumann_delta(3600.0))
+    err = abs(sol_exact.delta[-1] - exact) / exact
+    print(f"h_c=0, Ste={st_exact.stefan_number:.4f}:")
+    print(f"  PDE delta(1 h) = {sol_exact.delta[-1] * 1e3:.4f} mm | "
+          f"Neumann = {exact * 1e3:.4f} mm | rel. error = {err:.2e}")
+
+    # (b) Convective surface with the WINICE/SnowTek numbers, over 24 h.
+    st = Stefan1D(k_eff=2.22, rho=917.0, cp=2100.0, Lf=3.34e5,
+                  T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0, n_xi=200)
+    sol = st.solve(86400.0, delta0=1e-5, n_out=50)
+    d_star = st.k_eff * (st.T_f - st.T_wall) / (st.h_c * (st.T_f - st.T_inf))
+    print(f"\nConvective branch (h_c=160 W/m^2K):")
+    print(f"  Conduction/convection crossover delta* = {d_star * 1e3:.2f} mm")
+    print("  t [h]   delta_PDE [mm]   delta_quasi [mm]")
+    for t in (1.0, 6.0, 12.0, 24.0):
+        t_s = t * 3600.0
+        print(f"  {t:5.1f}   {sol.delta_at(t_s) * 1e3:12.3f}   "
+              f"{float(st.quasi_steady_delta(t_s, 1e-5)) * 1e3:14.3f}")
+
+
+def case8_stefan_film_and_hybrid_shedding() -> None:
+    print("\n" + "=" * 78)
+    print("CASE 8: Coupled Stefan Solver — Runback Film + Hybrid Shedding")
+    print("=" * 78)
+
+    common = dict(k_eff=2.22, rho=917.0, cp=2100.0, Lf=3.34e5,
+                  T_wall=-4.13, T_inf=-4.13, T_f=-1.18, h_c=160.0)
+
+    # (a) Full Messinger surface balance with a lumped runback film.
+    st_film = Stefan1D(**common, mdot_imp=6e-3, cp_imp=4186.0,
+                       V_imp=30.0, tau_drain=30.0, n_xi=120)
+    sol_film = st_film.solve(2 * 3600.0, delta0=1e-5, n_out=80)
+    print(sol_film.summary())
+    h_steady = (st_film.tau_drain / st_film.rho_w
+                * (st_film.mdot_imp - sol_film.mdot_ice[-1]
+                   - st_film.mdot_evap))
+    print(f"  Steady-film prediction h_f* = {h_steady * 1e3:.4f} mm "
+          f"(computed {sol_film.film[-1] * 1e3:.4f} mm)")
+
+    # (b) Accretion with discrete centrifugal shedding events.
+    st_hyb = Stefan1D(**common, mdot_imp=3e-3, n_xi=100)
+    hyb = st_hyb.solve_with_shedding(
+        [stefan_shedding_event(delta_crit=0.01, shed_fraction=0.8)],
+        12 * 3600.0, delta0=1e-5, n_out=240,
+    )
+    print(f"\nHybrid front tracking: {len(hyb.events)} shedding events "
+          f"at delta_crit = 10 mm")
+    for ev in hyb.events[:5]:
+        print(f"  t = {ev.time:7.1f} s | delta {ev.pre_value * 1e3:5.2f} -> "
+              f"{ev.post_value * 1e3:5.2f} mm")
+    if len(hyb.events) > 5:
+        print(f"  ... ({len(hyb.events) - 5} more)")
+
+
 if __name__ == "__main__":
-    case1_impingement_and_sparse_saturating_pi()
     case2_snowtek_disc_rhsv()
     case3_winice_stefan_growth_and_htc_fouling()
     case4_nested_rotor_shedding_dag()
     case5_cohesive_fracture_and_winice_flaws()
     case6_hybrid_shedding_curveball_diagnostic()
+    case7_stefan_front_tracking()
+    case8_stefan_film_and_hybrid_shedding()

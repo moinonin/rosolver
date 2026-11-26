@@ -21,6 +21,13 @@ from .numerical import (
 )
 from .odesys import ODESystem, Trajectory
 from .pde import BC, ConservationLaw1D, PDESolution, cell_average
+from .phasechange import (
+    HybridStefanSolution,
+    Stefan1D,
+    StefanSolution,
+    neumann_lambda,
+    stefan_shedding_event,
+)
 from .simulate import (
     SimulationResult,
     plot_conservation_audit,
@@ -30,6 +37,7 @@ from .simulate import (
     plot_ranked,
     plot_simulation,
     plot_stability_spectrum,
+    plot_stefan,
     simulate,
     simulate_and_plot,
 )
@@ -109,6 +117,7 @@ __all__ = [
     "FixedStepResult",
     "GCIReport",
     "HybridODESolution",
+    "HybridStefanSolution",
     "MMSReport",
     "NumericalSolver",
     "ODESolution",
@@ -121,6 +130,8 @@ __all__ = [
     "SheddingRecord",
     "SimulationResult",
     "StiffnessReport",
+    "Stefan1D",
+    "StefanSolution",
     "SymbolicSolver",
     "System",
     "TimestepReport",
@@ -138,6 +149,7 @@ __all__ = [
     "integrate_fixed",
     "max_stable_dt",
     "mms_study",
+    "neumann_lambda",
     "plot_conservation_audit",
     "plot_gci_study",
     "plot_hybrid",
@@ -145,9 +157,11 @@ __all__ = [
     "plot_ranked",
     "plot_simulation",
     "plot_stability_spectrum",
+    "plot_stefan",
     "simulate",
     "simulate_and_plot",
     "solve_partitioned_fixed_point",
     "stability_function",
+    "stefan_shedding_event",
     "timestep_study",
 ]

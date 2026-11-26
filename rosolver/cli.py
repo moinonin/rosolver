@@ -73,8 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--gci",
         default=None,
-        help="Standalone ASME V&V 20 GCI check on external solver outputs: 'h1,h2,h3:phi1,phi2,phi3' "
-        "(e.g. '0.01,0.02,0.04:1.957,1.948,1.912').",
+        help="Standalone Roache/Celik GCI check (inspired by ASME V&V 20) on external solver outputs: "
+        "'h1,h2,h3:phi1,phi2,phi3' (e.g. '0.01,0.02,0.04:1.957,1.948,1.912').",
     )
     p.add_argument("--formal-order", type=float, default=None, help="Optional formal order p for --gci.")
     p.add_argument("--gci-plot", default=None, help="Optional image path to plot --gci convergence band.")
