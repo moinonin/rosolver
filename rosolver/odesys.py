@@ -9,7 +9,7 @@ fixed-step and adaptive integration, and construction from rosolver derivations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -36,6 +36,8 @@ class Trajectory:
     message: str = ""
     dt: Optional[float] = None
     njev: int = 0
+    newton_failures: int = 0
+    warnings: List[str] = field(default_factory=list)
 
     def __getitem__(self, name: str) -> np.ndarray:
         return self.y[:, self.states.index(name)]
@@ -148,6 +150,7 @@ class ODESystem:
         t_eval: Optional[Sequence[float]] = None,
         dt: Optional[float] = None,
         max_step: float = np.inf,
+        raise_on_failure: bool = False,
     ) -> Trajectory:
         """
         Integrate the system. `method` is a scipy name ('RK45', 'Radau', 'BDF', 'LSODA', ...)
@@ -160,13 +163,27 @@ class ODESystem:
                 raise ValueError(f"Fixed-step scheme '{method}' requires dt.")
             res = integrate_fixed(f, t_span, y0v, dt, scheme=method, n_out=n_out if t_eval is None else None,
                                   jac=self.jac_function(params))
-            return Trajectory(res.t, res.y, list(self.states), res.scheme, res.nfev, True,
-                              "fixed-step", dt=res.dt)
+            ok = res.newton_failures == 0
+            warns = (
+                [f"Fixed-step implicit solver '{res.scheme}' encountered {res.newton_failures} Newton convergence failure(s)."]
+                if not ok
+                else []
+            )
+            msg = "fixed-step" if ok else warns[0]
+            if raise_on_failure and not ok:
+                raise RuntimeError(msg)
+            return Trajectory(res.t, res.y, list(self.states), res.scheme, res.nfev, ok,
+                              msg, dt=res.dt, newton_failures=res.newton_failures, warnings=warns)
         te = np.linspace(t_span[0], t_span[1], (n_out or 200) + 1) if t_eval is None else np.asarray(t_eval)
         kw = {"jac": self.jac_function(params)} if method in _IMPLICIT_SCIPY else {}
         sol = solve_ivp(f, t_span, y0v, method=method, t_eval=te, rtol=rtol, atol=atol, max_step=max_step, **kw)
-        return Trajectory(sol.t, sol.y.T, list(self.states), method, int(sol.nfev), bool(sol.success),
-                          str(sol.message), njev=int(getattr(sol, "njev", 0) or 0))
+        ok = bool(sol.success)
+        msg = str(sol.message)
+        warns = [] if ok else [f"ODE solver '{method}' did not succeed: {msg}"]
+        if raise_on_failure and not ok:
+            raise RuntimeError(msg)
+        return Trajectory(sol.t, sol.y.T, list(self.states), method, int(sol.nfev), ok,
+                          msg, njev=int(getattr(sol, "njev", 0) or 0), warnings=warns)
 
     def step(self, t0: float, t1: float, y0, params=None, method: str = "RK45",
              rtol: float = 1e-10, atol: float = 1e-12) -> np.ndarray:

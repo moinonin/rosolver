@@ -149,6 +149,9 @@ class StefanSolution:
     film: Optional[np.ndarray] = None
     mdot_out: Optional[np.ndarray] = None
     q_sens: Optional[np.ndarray] = None
+    success: bool = True
+    newton_failures: int = 0
+    warnings: List[str] = field(default_factory=list)
     n_xi: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -526,6 +529,8 @@ class Stefan1D:
         method: str,
         n_steps: int,
         nfev: int,
+        newton_failures: int = 0,
+        warnings: Optional[List[str]] = None,
     ) -> StefanSolution:
         """Post-process a raw state history into a `StefanSolution`."""
         m = self.n_xi - 1
@@ -566,6 +571,8 @@ class Stefan1D:
             params=params, method=method, n_steps=n_steps, nfev=nfev,
             T_s=T_s, mdot_ice=mdot_ice, branch=branch, mdot_imp=self.mdot_imp,
             film=film, mdot_out=mdot_out, q_sens=q_sens,
+            success=(newton_failures == 0), newton_failures=newton_failures,
+            warnings=list(warnings or []),
         )
 
     def solve(
@@ -593,11 +600,18 @@ class Stefan1D:
         z0 = self.initial_state(delta0)
         times = np.linspace(t0, t_end, int(n_out) + 1)
 
+        newton_failures = 0
+        warnings: List[str] = []
         if is_fixed_scheme(method):
             if dt is None:
                 raise ValueError(f"Fixed-step scheme '{method}' requires `dt`.")
             res = integrate_fixed(self.rhs, (t0, t_end), z0, dt, scheme=method, n_out=n_out)
             t, Z, n_steps, nfev = res.t, res.y, res.n_steps, res.nfev
+            newton_failures = res.newton_failures
+            if newton_failures > 0:
+                warnings.append(
+                    f"Implicit scheme '{method}' encountered {newton_failures} Newton convergence failure(s)."
+                )
         else:
             kw: Dict[str, Any] = {}
             if method in _SCIPY_IMPLICIT:
@@ -609,7 +623,10 @@ class Stefan1D:
             t, Z = sol.t, sol.y.T
             n_steps, nfev = max(len(t) - 1, 0), int(sol.nfev)
 
-        return self._assemble(t, Z, method, n_steps, nfev)
+        return self._assemble(
+            t, Z, method, n_steps, nfev,
+            newton_failures=newton_failures, warnings=warnings,
+        )
 
     def solve_with_shedding(
         self,
@@ -719,5 +736,7 @@ class Stefan1D:
             params=sol_out.params, method=sol_out.method, n_steps=sol_out.n_steps,
             nfev=sol_out.nfev, T_s=sol_out.T_s, mdot_ice=sol_out.mdot_ice,
             branch=sol_out.branch, mdot_imp=sol_out.mdot_imp, film=sol_out.film,
-            mdot_out=sol_out.mdot_out, q_sens=sol_out.q_sens, events=records,
+            mdot_out=sol_out.mdot_out, q_sens=sol_out.q_sens,
+            success=sol_out.success, newton_failures=sol_out.newton_failures,
+            warnings=sol_out.warnings, events=records,
         )

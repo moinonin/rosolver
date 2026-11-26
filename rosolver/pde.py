@@ -18,12 +18,14 @@ Discretisation
 * Time integration: fixed-step schemes from `integrators` (dt from a CFL number or given),
   or any scipy `solve_ivp` method (with a banded Jacobian sparsity pattern for implicit ones).
 
-Discrete conservation audit
----------------------------
+Discrete conservation accounting
+------------------------------
 The boundary fluxes and the integrated source are appended to the state vector and advanced
 with the *same* Runge-Kutta stages, so the discrete budget
     total(t) - total(0) = inflow_left - outflow_right + source
-holds to round-off for any conservative scheme. `verify.conservation_audit` checks it.
+closes to round-off for any conservative scheme. `verify.audit_pde_conservation` checks this
+internal accounting consistency; independent analytical and MMS benchmarks are required to verify
+discrete PDE convergence and physical correctness.
 """
 
 from __future__ import annotations
@@ -144,6 +146,9 @@ class PDESolution:
     cfl_max: float
     formal_order: int
     budget: Dict[str, Dict[str, np.ndarray]] = field(default_factory=dict)
+    success: bool = True
+    newton_failures: int = 0
+    warnings: List[str] = field(default_factory=list)
 
     @property
     def n_cells(self) -> int:
@@ -322,12 +327,19 @@ class ConservationLaw1D:
         mN = m * N
         y0 = np.concatenate([U0.ravel(), np.zeros(3 * m)])
 
+        newton_failures = 0
+        warnings: List[str] = []
         if is_fixed_scheme(scheme):
             if dt is None:
                 rate = fv.max_rate(U0, t0)
                 dt = cfl / rate if rate > 0 else (t_end - t0) / 100.0
             res = integrate_fixed(fv.rhs_aug, (t0, t_end), y0, dt, scheme=scheme, n_out=n_out)
             t, Y, dt_used, n_steps, nfev = res.t, res.y, res.dt, res.n_steps, res.nfev
+            newton_failures = res.newton_failures
+            if newton_failures > 0:
+                warnings.append(
+                    f"Implicit scheme '{scheme}' encountered {newton_failures} Newton convergence failure(s)."
+                )
         else:
             te = np.linspace(t0, t_end, n_out + 1)
             kw = {"jac_sparsity": fv.sparsity()} if scheme in _IMPLICIT_SCIPY else {}
@@ -353,6 +365,7 @@ class ConservationLaw1D:
             fields=list(self.fields), x=fv.xc, edges=fv.xf, t=np.asarray(t), U=U, h=fv.h,
             scheme=scheme, reconstruction=reconstruction, dt=dt_used, n_steps=n_steps, nfev=nfev,
             cfl_max=cfl_max, formal_order=1 if reconstruction == "constant" else 2, budget=budget,
+            success=(newton_failures == 0), newton_failures=newton_failures, warnings=warnings,
         )
 
 

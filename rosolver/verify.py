@@ -1,8 +1,9 @@
 """
-Generic Verification & Numerical Coupling Stability Suite (ASME V&V 20 / Roache / Celik 2008).
+Generic Verification & Numerical Coupling Stability Suite (Roache / Celik 2008 / MMS).
 
-Domain-agnostic verification tools applicable to fluid mechanics, heat & mass transfer,
-chemical kinetics, epidemiology, structural mechanics, population biology, and economics:
+Inspired by ASME V&V 20 and AIAA S-141 principles (without implying formal standards
+certification). Domain-agnostic verification tools applicable to fluid mechanics, heat & mass
+transfer, chemical kinetics, epidemiology, structural mechanics, population biology, and economics:
 
   1. Grid Independence & Spatial Mesh Convergence:
        - `gci_from_values`: Roache Grid Convergence Index (GCI) + Celik et al. (2008) fixed-point
@@ -16,10 +17,10 @@ chemical kinetics, epidemiology, structural mechanics, population biology, and e
        - `timestep_study`: Fixed-step dt convergence, observed temporal order, Richardson limit,
          CFL / Fourier dimensionless stability numbers, and hybrid event-timestamp drift checks.
 
-  3. Conservation Audits (Mass, Energy, Momentum, Population, Charge, Hamiltonian Invariants):
-       - `audit_pde_conservation`: Machine-precision flux-and-source ledger check on `PDESolution`.
+  3. Conservation Audits & Accounting Checks:
+       - `audit_pde_conservation`: Internal FVM flux-and-source ledger accounting check on `PDESolution`.
        - `audit_ode_invariants`: Symbolic model-level check (dI/dt == 0) + numerical trajectory drift.
-       - `audit_hybrid_conservation`: Global conservation audit across discontinuous jump/reset events.
+       - `audit_hybrid_conservation`: Global accounting audit across discontinuous jump/reset events.
 
   4. Numerical Coupling & Stiffness Stability:
        - `analyze_stiffness`: Symbolic/FD Jacobian spectrum, stiffness ratio, and exact maximum
@@ -33,6 +34,7 @@ chemical kinetics, epidemiology, structural mechanics, population biology, and e
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -52,6 +54,16 @@ from .odesys import ODESystem, Trajectory
 from .pde import BC, ConservationLaw1D, PDESolution, cell_average
 
 
+class VerificationStatus(str, Enum):
+    """Five-state scientific verification classification (P0.1)."""
+
+    PASSED = "Passed"
+    FAILED = "Failed"
+    INCONCLUSIVE = "Inconclusive"
+    NOT_ASSESSED = "NotAssessed"
+    WARNING = "Warning"
+
+
 # ============================================================================
 # 1. Grid Independence, Spatial Mesh Convergence (GCI) & Manufactured Solutions
 # ============================================================================
@@ -59,7 +71,7 @@ from .pde import BC, ConservationLaw1D, PDESolution, cell_average
 
 @dataclass
 class GCIReport:
-    """ASME V&V 20 / Celik et al. (2008) three-grid convergence and uncertainty report."""
+    """Roache / Celik et al. (2008) three-grid convergence and uncertainty report."""
 
     spacings: Tuple[float, float, float]       # (h1_fine, h2_medium, h3_coarse)
     values: Tuple[float, float, float]         # (phi1_fine, phi2_medium, phi3_coarse)
@@ -77,44 +89,97 @@ class GCIReport:
     safety_factor: float = 1.25
     passed: bool = True
     notes: List[str] = field(default_factory=list)
+    all_spacings: Optional[Tuple[float, ...]] = None
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         h1, h2, h3 = self.spacings
         p1, p2, p3 = self.values
         lines = [
             "=== Grid Convergence Index (GCI) Report ===",
+            f"  Status: {self.status.value} | Passed: {self.passed} | Safety factor Fs={self.safety_factor:g}",
             f"  Spacings (fine, med, coarse): ({h1:.6g}, {h2:.6g}, {h3:.6g}) | r21={self.r21:.4g}, r32={self.r32:.4g}",
             f"  QoI      (fine, med, coarse): ({p1:.8g}, {p2:.8g}, {p3:.8g})",
             f"  Regime: {self.regime} | Observed order p = {self.observed_order:.4f}"
             + (f" (formal = {self.formal_order:.2f})" if self.formal_order is not None else ""),
             f"  Richardson extrapolated phi_ext = {self.extrapolated_value:.8g}",
             f"  GCI_fine (21) = {self.gci_fine_21 * 100:.4f}% | GCI_coarse (32) = {self.gci_coarse_32 * 100:.4f}%",
-            f"  Asymptotic ratio = {self.asymptotic_ratio:.4f} (ideal ~ 1.0) | Passed: {self.passed}",
+            f"  Asymptotic ratio = {self.asymptotic_ratio:.4f} (ideal ~ 1.0)",
         ]
+        for w in self.warnings:
+            lines.append(f"  Warning: {w}")
         for n in self.notes:
-            lines.append(f"  Note: {n}")
+            if n not in self.warnings:
+                lines.append(f"  Note: {n}")
         return "\n".join(lines)
 
 
-def _celik_observed_order(e32: float, e21: float, r21: float, r32: float, max_iter: int = 200) -> float:
-    """Solve p = |ln|e32/e21| + q(p)| / ln(r21) per Celik et al. (2008), ASME J. Fluids Eng. 130."""
+def _celik_observed_order(
+    e32: float, e21: float, r21: float, r32: float, max_iter: int = 200
+) -> Tuple[float, bool, Optional[str]]:
+    """
+    Solve p = |ln|e32/e21| + q(p)| / ln(r21) per Celik et al. (2008), ASME J. Fluids Eng. 130.
+    Returns (p_obs, converged, failure_reason).
+    """
     ratio = abs(e32 / e21)
     s = 1.0 if (e32 / e21) >= 0.0 else -1.0
     if abs(r21 - r32) < 1e-12:
-        return float(abs(np.log(ratio)) / np.log(r21))
+        raw = float(np.log(ratio) / np.log(r21))
+        if not np.isfinite(raw) or raw <= 0.0:
+            return raw, False, "Observed order is non-positive (apparent divergence)."
+        return raw, True, None
+
+    if s > 0.0:
+        min_ratio = float(np.log(r32) / np.log(r21))
+        if ratio <= min_ratio:
+            return float("nan"), False, (
+                f"No positive observed order satisfies Celik equation (|e32/e21|={ratio:.4g} <= "
+                f"ln(r32)/ln(r21)={min_ratio:.4g})."
+            )
+
+    def _celik_res(p_val: float) -> float:
+        num = (r21 ** p_val) - s
+        den = (r32 ** p_val) - s
+        if num * den <= 0.0 or num == 0.0 or den == 0.0:
+            return float("nan")
+        return float(p_val - (np.log(ratio) + np.log(num / den)) / np.log(r21))
+
     p = max(abs(np.log(ratio)) / np.log(r21), 1e-4)
+    converged = False
     for _ in range(max_iter):
-        num = r21 ** p - s
-        den = r32 ** p - s
-        if num * den <= 0:
+        num = (r21 ** p) - s
+        den = (r32 ** p) - s
+        if num * den <= 0.0 or num == 0.0 or den == 0.0:
             break
-        q = np.log(num / den)
-        p_next = abs(np.log(ratio) + q) / np.log(r21)
+        q = float(np.log(num / den))
+        rhs = (np.log(ratio) + q) / np.log(r21)
+        if not np.isfinite(rhs) or rhs <= 0.0:
+            p = float("nan")
+            break
+        p_next = float(rhs)
         if abs(p_next - p) < 1e-12:
             p = p_next
+            converged = True
             break
         p = 0.5 * p + 0.5 * p_next
-    return float(p)
+
+    if converged and np.isfinite(p) and p > 0.0:
+        return float(p), True, None
+
+    from scipy.optimize import brentq
+
+    grid = np.geomspace(1e-3, 20.0, 60)
+    vals = [_celik_res(float(g)) for g in grid]
+    for idx in range(len(grid) - 1):
+        v0, v1 = vals[idx], vals[idx + 1]
+        if np.isfinite(v0) and np.isfinite(v1) and v0 * v1 <= 0.0:
+            p_root = float(brentq(_celik_res, float(grid[idx]), float(grid[idx + 1]), xtol=1e-12))
+            if p_root > 0.0:
+                return p_root, True, None
+
+    return float("nan"), False, "Celik observed-order iteration did not converge to a positive root."
 
 
 def gci_from_values(
@@ -129,11 +194,13 @@ def gci_from_values(
     Compute Roache GCI and Celik observed order from >= 3 (grid_spacing, quantity) pairs.
 
     Pairs may be passed in any order; they are sorted automatically so index 0 is the finest
-    mesh (smallest spacing h1). If more than 3 levels are given, the 3 finest levels are used.
+    mesh (smallest spacing h1). If more than 3 levels are given, the 3 finest levels are used
+    and the full sequence is recorded in `all_spacings` with an explicit note.
     """
     if len(spacings) != len(quantities) or len(spacings) < 3:
         raise ValueError("Provide at least 3 matching (spacing, quantity) values.")
     pairs = sorted(zip([float(h) for h in spacings], [float(q) for q in quantities]), key=lambda kv: kv[0])
+    all_h = tuple(h for h, _ in pairs)
     (h1, phi1), (h2, phi2), (h3, phi3) = pairs[0], pairs[1], pairs[2]
     if h1 <= 0 or h2 <= h1 or h3 <= h2:
         raise ValueError(f"Grid spacings must be strictly positive and distinct; got {(h1, h2, h3)}.")
@@ -143,13 +210,31 @@ def gci_from_values(
     e32 = phi3 - phi2
     e21 = phi2 - phi1
     notes: List[str] = []
+    warnings: List[str] = []
+    assumptions = [
+        "Method: Roache GCI / Celik et al. (2008), inspired by ASME V&V 20 principles (not formal certification).",
+        f"Safety factor Fs={safety_factor:g}; assumes grids lie in the asymptotic convergence range.",
+    ]
 
-    if r21 < 1.3 or r32 < 1.3:
-        notes.append("ASME V&V 20 recommends grid refinement ratios r >= 1.3.")
+    if len(pairs) > 3:
+        notes.append(
+            f"Received {len(pairs)} refinement levels; GCI evaluated on the 3 finest levels "
+            f"({h1:.6g}, {h2:.6g}, {h3:.6g})."
+        )
+
+    small_r = (r21 < 1.3) or (r32 < 1.3)
+    if small_r:
+        msg = (
+            f"Grid refinement ratio below recommended r >= 1.3 (r21={r21:.3g}, r32={r32:.3g}); "
+            "discretization uncertainty estimate may be unreliable."
+        )
+        notes.append(msg)
+        warnings.append(msg)
 
     scale = max(abs(phi1), abs(phi2), abs(phi3), 1.0)
     if abs(e21) <= 1e-14 * scale and abs(e32) <= 1e-14 * scale:
         p_obs = formal_order if formal_order is not None else float("nan")
+        status = VerificationStatus.WARNING if small_r else VerificationStatus.PASSED
         return GCIReport(
             spacings=(h1, h2, h3),
             values=(phi1, phi2, phi3),
@@ -165,41 +250,111 @@ def gci_from_values(
             asymptotic_ratio=1.0,
             regime="converged_exact",
             safety_factor=safety_factor,
-            passed=True,
+            passed=(not small_r),
             notes=notes + ["Differences below machine precision; solution already grid-exact."],
+            all_spacings=all_h,
+            status=status,
+            warnings=warnings,
+            assumptions=assumptions,
         )
+
+    ea21 = abs((phi1 - phi2) / phi1) if abs(phi1) > 1e-30 else abs(phi1 - phi2)
+    ea32 = abs((phi2 - phi3) / phi2) if abs(phi2) > 1e-30 else abs(phi2 - phi3)
 
     if abs(e21) <= 1e-15 * scale:
         p_obs = formal_order if formal_order is not None else 2.0
+        celik_ok = True
+        celik_err = None
         regime = "converged_exact"
+    elif abs(e32) <= 1e-15 * scale:
+        p_obs = float("nan")
+        celik_ok = False
+        celik_err = "Coarse-to-medium increment is zero while fine-to-medium increment is nonzero (apparent divergence)."
+        regime = "divergent"
     else:
-        ratio = e21 / e32 if abs(e32) > 0 else np.inf
-        if 0.0 < ratio < 1.0:
+        p_obs, celik_ok, celik_err = _celik_observed_order(e32, e21, r21, r32)
+        if e21 * e32 < 0.0:
+            if abs(e21) < abs(e32) and celik_ok:
+                regime = "oscillatory"
+                msg = "Oscillatory convergence detected (sign change between mesh increments)."
+                notes.append(msg)
+                warnings.append(msg)
+            else:
+                regime = "divergent"
+                msg = "Oscillatory non-convergent or divergent sequence (|phi2 - phi1| >= |phi3 - phi2|)."
+                notes.append(msg)
+                warnings.append(msg)
+        elif celik_ok and np.isfinite(p_obs) and p_obs > 0.0:
             regime = "monotonic"
-        elif ratio < 0.0 and abs(ratio) < 1.0:
-            regime = "oscillatory"
-            notes.append("Oscillatory convergence detected (sign change between mesh increments).")
         else:
             regime = "divergent"
-            notes.append("Apparent divergence (|phi2 - phi1| >= |phi3 - phi2|); refine further into asymptotic range.")
-        p_obs = _celik_observed_order(e32, e21, r21, r32) if abs(e32) > 0 else (formal_order or 1.0)
+            msg = celik_err or "Apparent divergence (|phi2 - phi1| >= |phi3 - phi2|); refine further into asymptotic range."
+            notes.append(msg)
+            warnings.append(msg)
 
+    if regime == "divergent" or not celik_ok or not np.isfinite(p_obs) or p_obs <= 0.0:
+        if celik_err and celik_err not in warnings:
+            warnings.append(celik_err)
+            notes.append(celik_err)
+        status = VerificationStatus.FAILED if regime == "divergent" else VerificationStatus.INCONCLUSIVE
+        return GCIReport(
+            spacings=(h1, h2, h3),
+            values=(phi1, phi2, phi3),
+            r21=r21,
+            r32=r32,
+            observed_order=float(p_obs) if np.isfinite(p_obs) else float("nan"),
+            formal_order=formal_order,
+            extrapolated_value=float("nan"),
+            approx_rel_error_21=ea21,
+            extrapolated_rel_error_21=float("nan"),
+            gci_fine_21=float("nan"),
+            gci_coarse_32=float("nan"),
+            asymptotic_ratio=float("nan"),
+            regime=regime,
+            safety_factor=safety_factor,
+            passed=False,
+            notes=notes,
+            all_spacings=all_h,
+            status=status,
+            warnings=warnings,
+            assumptions=assumptions,
+        )
+
+    clamped = p_obs < 0.1 or p_obs > 10.0
     p_eff = max(min(p_obs, 10.0), 0.1)
+    if clamped:
+        msg = f"Observed order p={p_obs:.3f} clamped to {p_eff:.2f} (outside [0.1, 10.0]) for Richardson/GCI stability."
+        notes.append(msg)
+        warnings.append(msg)
+
     denom21 = (r21 ** p_eff) - 1.0
     denom32 = (r32 ** p_eff) - 1.0
     phi_ext = (r21 ** p_eff * phi1 - phi2) / denom21
-    ea21 = abs((phi1 - phi2) / phi1) if abs(phi1) > 1e-30 else abs(phi1 - phi2)
-    ea32 = abs((phi2 - phi3) / phi2) if abs(phi2) > 1e-30 else abs(phi2 - phi3)
     eext21 = abs((phi_ext - phi1) / phi_ext) if abs(phi_ext) > 1e-30 else abs(phi_ext - phi1)
     gci21 = safety_factor * ea21 / denom21
     gci32 = safety_factor * ea32 / denom32
     asym = gci32 / ((r21 ** p_eff) * gci21) if gci21 > 0 else 1.0
 
-    passed = (regime in ("monotonic", "oscillatory", "converged_exact")) and (gci21 <= gci_tol)
-    if formal_order is not None and regime == "monotonic":
-        if abs(p_obs - formal_order) > order_tol:
-            notes.append(f"Observed order {p_obs:.2f} deviates from formal order {formal_order:.2f} by > {order_tol}.")
-            passed = False
+    failed_reasons: List[str] = []
+    if gci21 > gci_tol:
+        failed_reasons.append(f"GCI_fine {gci21:.4g} exceeds tolerance {gci_tol:.4g}.")
+    if formal_order is not None and regime == "monotonic" and abs(p_obs - formal_order) > order_tol:
+        failed_reasons.append(
+            f"Observed order {p_obs:.2f} deviates from formal order {formal_order:.2f} by > {order_tol}."
+        )
+    for r_msg in failed_reasons:
+        notes.append(r_msg)
+        warnings.append(r_msg)
+
+    if failed_reasons:
+        status = VerificationStatus.FAILED
+        passed = False
+    elif regime == "oscillatory" or small_r or clamped:
+        status = VerificationStatus.WARNING
+        passed = False
+    else:
+        status = VerificationStatus.PASSED
+        passed = True
 
     return GCIReport(
         spacings=(h1, h2, h3),
@@ -218,6 +373,10 @@ def gci_from_values(
         safety_factor=safety_factor,
         passed=passed,
         notes=notes,
+        all_spacings=all_h,
+        status=status,
+        warnings=warnings,
+        assumptions=assumptions,
     )
 
 
@@ -261,11 +420,14 @@ class MMSReport:
     formal_order: float
     manufactured_sources: Dict[str, sp.Expr]
     passed: bool
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [
             f"=== MMS Code Verification Report (formal order = {self.formal_order:.2f}) ===",
-            f"  Grids N = {self.cells}",
+            f"  Status: {self.status.value} | Passed: {self.passed} | Grids N = {self.cells}",
         ]
         for f in self.fields:
             lines.append(
@@ -273,7 +435,8 @@ class MMSReport:
                 f"p_L2={self.order_l2[f]:.3f}, p_Linf={self.order_linf[f]:.3f} | "
                 f"finest L2={self.errors_l2[f][-1]:.3e}"
             )
-        lines.append(f"  Passed: {self.passed}")
+        for w in self.warnings:
+            lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
 
@@ -357,11 +520,25 @@ def mms_study(
     ord_linf = {f: _fit_log_slope(h_arr, e_linf[f]) for f in law.fields}
 
     # TVD slope limiters clip slightly at smooth extrema (~1.7-2.0 in L2); unlimited 'linear' hits 2.0
-    effective_tol = order_tol if reconstruction in ("constant", "linear") else max(order_tol, 0.45)
+    warnings: List[str] = []
+    if reconstruction not in ("constant", "linear"):
+        effective_tol = max(order_tol, 0.45)
+        warnings.append(
+            f"TVD limiter '{reconstruction}' clips smooth extrema; order tolerance relaxed to {effective_tol:.2f}."
+        )
+    else:
+        effective_tol = order_tol
     passed = all(
         (not np.isnan(ord_l2[f])) and (ord_l2[f] >= formal - effective_tol)
         for f in law.fields
     )
+    if not passed:
+        for f in law.fields:
+            if np.isnan(ord_l2[f]) or ord_l2[f] < formal - effective_tol:
+                warnings.append(
+                    f"Field '{f}' observed L2 order {ord_l2[f]:.3f} below threshold {formal - effective_tol:.3f}."
+                )
+    status = VerificationStatus.PASSED if passed else VerificationStatus.FAILED
     return MMSReport(
         fields=list(law.fields),
         cells=[int(n) for n in cells],
@@ -375,6 +552,11 @@ def mms_study(
         formal_order=formal,
         manufactured_sources=s_mms,
         passed=passed,
+        status=status,
+        warnings=warnings,
+        assumptions=[
+            f"Code verification via symbolic MMS forcing on ConservationLaw1D (reconstruction='{reconstruction}', scheme='{scheme}')."
+        ],
     )
 
 
@@ -395,10 +577,14 @@ class TimestepReport:
     fourier_numbers: Optional[Tuple[float, ...]] = None
     event_time_drift: Optional[float] = None
     passed: bool = True
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         lines = [
             "=== Time-Step Sensitivity Report ===",
+            f"  Status: {self.status.value} | Passed: {self.passed}",
             f"  Steps dt: {tuple(round(d, 8) for d in self.dts)}"
             + (f" | Scheme: {self.scheme}" if self.scheme else ""),
             f"  QoI:      {tuple(round(v, 8) for v in self.values)}",
@@ -411,7 +597,8 @@ class TimestepReport:
             lines.append(f"  Fourier numbers: {tuple(round(fo, 4) for fo in self.fourier_numbers)}")
         if self.event_time_drift is not None:
             lines.append(f"  Finest event-timestamp drift |dt_ev|: {self.event_time_drift:.3e}")
-        lines.append(f"  Passed: {self.passed}")
+        for w in self.warnings:
+            lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
 
@@ -439,6 +626,8 @@ def timestep_study(
     if len(dts) < 3:
         raise ValueError("Provide at least 3 time-step sizes in `dts`.")
     dts_sorted = tuple(sorted((float(d) for d in dts)))
+    extra_warnings: List[str] = []
+    solver_failed = False
 
     if isinstance(runner_or_ode, ODESystem):
         if t_span is None or y0 is None:
@@ -449,6 +638,9 @@ def timestep_study(
         vals: List[float] = []
         for dt in dts_sorted:
             traj = runner_or_ode.solve(t_span, y0, params=params, method=scheme, dt=dt, n_out=2)
+            if not traj.success or traj.newton_failures > 0:
+                solver_failed = True
+                extra_warnings.extend(traj.warnings or [f"Solver failed at dt={dt:g}: {traj.message}"])
             used_dts.append(float(traj.dt or dt))
             vals.append(float(traj.final[target_state]))
         dts_final = tuple(used_dts)
@@ -470,6 +662,10 @@ def timestep_study(
     cfls = tuple(wave_speed * d / dx for d in dts_final) if (dx and wave_speed is not None) else None
     fos = tuple(diffusivity * d / (dx ** 2) for d in dts_final) if (dx and diffusivity is not None) else None
 
+    warnings = list(gci.warnings) + extra_warnings
+    passed = gci.passed and (not solver_failed)
+    status = VerificationStatus.FAILED if solver_failed else gci.status
+
     return TimestepReport(
         dts=dts_final,
         values=vals_final,
@@ -477,7 +673,10 @@ def timestep_study(
         scheme=scheme_used,
         cfl_numbers=cfls,
         fourier_numbers=fos,
-        passed=gci.passed,
+        passed=passed,
+        status=status,
+        warnings=warnings,
+        assumptions=list(gci.assumptions),
     )
 
 
@@ -505,9 +704,17 @@ class ConservationAuditReport:
     entries: Dict[str, FieldConservationEntry]
     tol: float
     passed: bool
+    verification_scope: str = ""
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        lines = [f"=== Conservation Audit Report [{self.kind}] (tol = {self.tol:.1e}) ==="]
+        scope_tag = f" | Scope: {self.verification_scope}" if self.verification_scope else ""
+        lines = [
+            f"=== Conservation Audit Report [{self.kind}] (tol = {self.tol:.1e}{scope_tag}) ===",
+            f"  Status: {self.status.value} | Overall Passed: {self.passed}",
+        ]
         for nm, e in self.entries.items():
             sym_tag = "" if e.symbolic_exact is None else f" | symbolic_exact={e.symbolic_exact}"
             lines.append(
@@ -515,16 +722,26 @@ class ConservationAuditReport:
                 f"max|R|={e.max_abs_residual:.3e}, rel|R|={e.max_rel_residual:.3e}"
                 f"{sym_tag} -> {'PASS' if e.passed else 'FAIL'}"
             )
-        lines.append(f"  Overall Passed: {self.passed}")
+        for w in self.warnings:
+            lines.append(f"  Warning: {w}")
         return "\n".join(lines)
 
 
 def audit_pde_conservation(sol: PDESolution, tol: float = 1e-10) -> ConservationAuditReport:
     """
-    Verify discrete FVM balance for every conserved field in `sol`:
+    Verify internal discrete FVM flux-and-source ledger accounting for every field in `sol`:
         R_k(t) = [total_k(t) - total_k(0)] - [inflow_left_k(t) - outflow_right_k(t) + source_k(t)].
+
+    Note: Closure of this augmented ledger demonstrates internal accounting consistency of the
+    time-integrated fluxes and sources; it does not independently prove discrete PDE convergence
+    or physical correctness (see independent analytical and MMS benchmarks).
     """
     entries: Dict[str, FieldConservationEntry] = {}
+    warnings: List[str] = list(getattr(sol, "warnings", []))
+    if not getattr(sol, "success", True) or getattr(sol, "newton_failures", 0) > 0:
+        warnings.append(
+            f"Underlying PDE solve reported newton_failures={getattr(sol, 'newton_failures', 0)}."
+        )
     for f in sol.fields:
         b = sol.budget[f]
         tot = b["total"]
@@ -549,12 +766,23 @@ def audit_pde_conservation(sol: PDESolution, tol: float = 1e-10) -> Conservation
             residual_series=res,
             passed=bool(max_rel <= tol),
         )
+    passed = all(e.passed for e in entries.values())
+    status = VerificationStatus.PASSED if passed else VerificationStatus.FAILED
+    if passed and warnings:
+        status = VerificationStatus.WARNING
     return ConservationAuditReport(
         kind="pde_fvm",
         t=sol.t,
         entries=entries,
         tol=tol,
-        passed=all(e.passed for e in entries.values()),
+        passed=passed,
+        verification_scope="accounting_consistency",
+        status=status,
+        warnings=warnings,
+        assumptions=[
+            "Evaluates internal RK-stage flux/source ledger closure (accounting consistency); "
+            "independent benchmarks are required for discrete conservation and physical correctness."
+        ],
     )
 
 
@@ -571,6 +799,7 @@ def audit_ode_invariants(
     both symbolically at the equation level (dI_j/dt == 0) and numerically along `traj`.
     """
     entries: Dict[str, FieldConservationEntry] = {}
+    warnings: List[str] = list(getattr(traj, "warnings", []))
     for name, expr in invariants.items():
         sym_ok, _ = system.check_invariant(expr)
         vals = system.evaluate(expr, traj, params=params)
@@ -589,12 +818,19 @@ def audit_ode_invariants(
             residual_series=res,
             passed=bool(ok),
         )
+    passed = all(e.passed for e in entries.values())
     return ConservationAuditReport(
         kind="ode_invariants",
         t=traj.t,
         entries=entries,
         tol=tol,
-        passed=all(e.passed for e in entries.values()),
+        passed=passed,
+        verification_scope="symbolic_and_trajectory_invariants",
+        status=VerificationStatus.PASSED if passed else VerificationStatus.FAILED,
+        warnings=warnings,
+        assumptions=[
+            f"Symbolic invariant check require_symbolic={require_symbolic} paired with trajectory drift <= {tol:.1e}."
+        ],
     )
 
 
@@ -655,6 +891,9 @@ def audit_hybrid_conservation(
         entries={"hybrid_total_budget": entry},
         tol=tol,
         passed=entry.passed,
+        verification_scope="hybrid_event_accounting",
+        status=VerificationStatus.PASSED if entry.passed else VerificationStatus.FAILED,
+        assumptions=["Compares retained + cumulative jump resets against trapezoidal integral of rate_fn."],
     )
 
 
@@ -673,12 +912,15 @@ class StiffnessReport:
     has_growing_mode: bool
     max_stable_dts: Dict[str, float]
     recommended_method: str
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         dt_str = ", ".join(f"{k}:{v:.3e}" for k, v in self.max_stable_dts.items())
         return (
             "=== Jacobian Stiffness & Explicit Step-Limit Report ===\n"
-            f"  Spectral radius = {self.spectral_radius:.4e} | Stiffness ratio = {self.stiffness_ratio:.4e}\n"
+            f"  Status: {self.status.value} | Spectral radius = {self.spectral_radius:.4e} | Stiffness ratio = {self.stiffness_ratio:.4e}\n"
             f"  Max Re(lambda) = {self.max_real_part:.4e} | Stiff: {self.is_stiff} | Growing mode: {self.has_growing_mode}\n"
             f"  Explicit dt_max: {dt_str}\n"
             f"  Recommended integrator: {self.recommended_method}"
@@ -718,6 +960,12 @@ def analyze_stiffness(
 
     dt_limits = {sc: max_stable_dt(sc, eigs) for sc in schemes}
     rec = "Radau / BDF (implicit)" if is_stiff else ("cn / rk4" if dt_limits.get("euler", 1.0) == 0.0 else "RK45 / ssprk3")
+    warnings: List[str] = []
+    if is_stiff:
+        warnings.append(f"Stiff Jacobian detected (ratio={stiff_ratio:.3g} >= {stiff_threshold:g}); prefer implicit integration.")
+    if has_grow:
+        warnings.append(f"Positive eigenvalue real part detected (max Re={max_re:.3g}).")
+    status = VerificationStatus.WARNING if (is_stiff or has_grow) else VerificationStatus.PASSED
     return StiffnessReport(
         eigenvalues=eigs,
         spectral_radius=spec_rad,
@@ -727,6 +975,9 @@ def analyze_stiffness(
         has_growing_mode=has_grow,
         max_stable_dts=dt_limits,
         recommended_method=rec,
+        status=status,
+        warnings=warnings,
+        assumptions=["Local linearization about supplied state; dt_max applies to non-growing modes."],
     )
 
 
@@ -740,11 +991,14 @@ class PartitionedCouplingReport:
     omega_history: List[float]
     asymptotic_contraction: float
     acceleration: str
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
             f"=== Partitioned Coupling Report [{self.acceleration}] ===\n"
-            f"  Converged: {self.converged} in {self.iterations} iter(s) | "
+            f"  Status: {self.status.value} | Converged: {self.converged} in {self.iterations} iter(s) | "
             f"Final ||r||_inf = {self.residual_history[-1]:.3e} | "
             f"Asymptotic contraction rho = {self.asymptotic_contraction:.4f}"
         )
@@ -808,6 +1062,7 @@ def solve_partitioned_fixed_point(
             break
 
     asym_rho = float(np.median(rho_hist[-3:])) if len(rho_hist) >= 3 else (rho_hist[-1] if rho_hist else 0.0)
+    warns = [] if converged else [f"Fixed-point coupling did not converge within {max_iter} iterations (rho={asym_rho:.3g})."]
     return PartitionedCouplingReport(
         converged=converged,
         iterations=len(res_hist),
@@ -817,6 +1072,9 @@ def solve_partitioned_fixed_point(
         omega_history=w_hist,
         asymptotic_contraction=asym_rho,
         acceleration=acc,
+        status=VerificationStatus.PASSED if converged else VerificationStatus.FAILED,
+        warnings=warns,
+        assumptions=[f"Picard fixed-point iteration with acceleration='{acc}' and tol={tol:.1e}."],
     )
 
 
@@ -832,11 +1090,14 @@ class CoSimulationReport:
     mode: str
     dt_macro: float
     converged: bool
+    status: VerificationStatus = VerificationStatus.PASSED
+    warnings: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
             f"=== Coupled Co-Simulation Report [{self.mode}, dt_macro={self.dt_macro:.4g}] ===\n"
-            f"  Converged: {self.converged} | Max error vs. monolithic = {self.max_error_vs_monolithic:.3e}\n"
+            f"  Status: {self.status.value} | Converged: {self.converged} | Max error vs. monolithic = {self.max_error_vs_monolithic:.3e}\n"
             f"  Total sub-iters = {self.total_subiterations} (max/step = {self.max_subiterations_per_step})"
         )
 
@@ -952,6 +1213,7 @@ def cosimulate_coupled_odes(
         hist[step_idx + 1] = np.concatenate([ya, yb])
 
     err = float(np.max(np.abs(hist - mono_traj.y)))
+    warns = [] if all_ok else ["One or more macro-step interface sub-iterations failed to converge."]
     return CoSimulationReport(
         t=t_grid,
         states=mono.states,
@@ -963,4 +1225,7 @@ def cosimulate_coupled_odes(
         mode=mode,
         dt_macro=dt_used,
         converged=all_ok,
+        status=VerificationStatus.PASSED if all_ok else VerificationStatus.FAILED,
+        warnings=warns,
+        assumptions=[f"Monolithic DOP853 reference compared against mode='{mode}' co-simulation at dt_macro={dt_used:.4g}."],
     )
