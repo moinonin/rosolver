@@ -4,7 +4,7 @@
 
 `rosolver` unifies first-principles **Chain-Rule + Dimensional Closure** (originating in [`ch1.tex`](docs/refs/ch1.tex)), validated solver-independent **`Model`** specifications, SHA-256 hash-verified **`Project`** workspaces with append-only execution ledgers, **OLS/WLS/NLLS calibration** with identifiability diagnostics, **1D FVM PDE / ODE / Stefan solvers**, **Verification & Validation (MMS, Roache/Celik GCI, conservation, experimental validation)**, and **Scientific Markdown/JSON/YAML reporting**.
 
-See full documentation at [docs/index.md](docs/index.md) and the complete module-by-module guide at [docs/user_guide/procedures.md](docs/user_guide/procedures.md).
+See full documentation at [docs/index.md](docs/index.md), the module-by-module guide at [docs/user_guide/procedures.md](docs/user_guide/procedures.md), and the AI agent MCP server guide at [docs/user_guide/mcp_server.md](docs/user_guide/mcp_server.md).
 
 ---
 
@@ -251,6 +251,7 @@ rosolver/
 │   ├── validation/        # Experimental Model ValidationStudy & uncertainty bands
 │   ├── integrations/      # SolverAdapter, GenericCSVAdapter, SciPyAdapter
 │   ├── io/                # Safe YAML/JSON/CSV/NPZ/HDF5 & SHA-256 project I/O
+│   ├── mcp/               # Zero-dependency stdio JSON-RPC 2.0 MCP server & 10 AI tools
 │   ├── reporting/         # ScientificReport (Markdown/JSON/YAML) & V&V plots
 │   └── cli.py             # Workflow subcommand CLI + backwards-compatible flat flags
 ├── examples/

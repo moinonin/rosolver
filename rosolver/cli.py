@@ -56,6 +56,7 @@ WORKFLOW_COMMANDS = frozenset(
         "validate-results",
         "report",
         "info",
+        "mcp",
     }
 )
 
@@ -261,6 +262,10 @@ def _build_workflow_parser() -> argparse.ArgumentParser:
     p_info = subs.add_parser("info", help="Display project metadata, models, datasets, and ledger summary.")
     p_info.add_argument("project", help="Project directory.")
     p_info.add_argument("--json", action="store_true", help="Emit structured JSON output.")
+
+    # mcp
+    p_mcp = subs.add_parser("mcp", help="Start the Rosolver Model Context Protocol (MCP) server over stdio.")
+    p_mcp.add_argument("--list-tools", action="store_true", help="Print registered MCP tool schemas as JSON and exit.")
 
     return p
 
@@ -701,6 +706,11 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
                     f"Generated {rep.report_type} report [{rep.status.value.upper()}] -> {rel_out}"
                 )
             return _exit_for_status(rep.status)
+
+        if args.command == "mcp":
+            from .mcp.server import main as mcp_main
+
+            return mcp_main(["--list-tools"] if args.list_tools else [])
 
     except (FileNotFoundError, ProjectError, ProvenanceMismatchError, ModelValidationError) as exc:
         err_payload = {"error": type(exc).__name__, "message": str(exc), "exit_code": EXIT_VALIDATION_ERROR}

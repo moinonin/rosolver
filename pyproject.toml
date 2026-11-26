@@ -41,9 +41,13 @@ gui = [
 pdf = [
     "weasyprint>=60.0",
 ]
+mcp = [
+    "mcp>=1.0",
+]
 
 [project.scripts]
 rosolver = "rosolver.cli:main"
+rosolver-mcp = "rosolver.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/moinonin/rosolver"

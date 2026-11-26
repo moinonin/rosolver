@@ -11,6 +11,7 @@ Rosolver is an open-source, reproducible scientific modeling, calibration, numer
 - **Getting Started & User Guide**
   - [Quickstart (Python API & Workflow CLI)](getting_started/quickstart.md)
   - [Extended Procedures Guide (Discovery, Solutions, Calibration, V&V & Reporting)](user_guide/procedures.md)
+  - [MCP Server Guide (`rosolver-mcp` for AI Agents)](user_guide/mcp_server.md)
 - **Concepts & Architecture**
   - [Package Architecture & Reproducibility Model](concepts/architecture.md)
   - [System Engineering Specification](architecture/ENG_SPEC.md)
