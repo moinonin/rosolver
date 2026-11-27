@@ -36,6 +36,81 @@ def _as_name_list(spec: Union[None, str, Sequence[str]]) -> List[str]:
     return list(spec)
 
 
+def load_tabular_csv(
+    path: Union[str, Path],
+    *,
+    missing_policy: str = "raise",
+    allow_string_columns: bool = False,
+) -> Dict[str, Any]:
+    """Row-aligned CSV reader shared across Dataset, Project, CLI, and ClaimAuditEngine.
+
+    Guarantees that all returned column arrays/lists have identical length ``N`` (zero
+    silent row shifting across columns). When ``allow_string_columns=True``, columns
+    containing non-numeric identifiers (e.g. ``sample_id``) are preserved as ``List[str]``
+    while numeric columns are returned as ``np.ndarray``.
+    """
+    if missing_policy not in ("raise", "drop", "nan", "mask"):
+        raise ValueError("missing_policy must be 'raise', 'drop', 'nan', or 'mask'.")
+    src = Path(path)
+    if not src.exists():
+        raise FileNotFoundError(f"CSV file not found: '{src}'.")
+
+    with src.open("r", newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames:
+            raise ValueError(f"CSV file '{src}' has no header row.")
+        raw_headers = [h for h in reader.fieldnames if h is not None]
+        headers = [h.strip() for h in raw_headers]
+        raw_rows: List[Dict[str, str]] = list(reader)
+
+    if not raw_rows:
+        return {h: np.array([], dtype=float) for h in headers}
+
+    parsed_cols: Dict[str, List[Any]] = {h: [] for h in headers}
+    is_string_col: Dict[str, bool] = {h: False for h in headers}
+
+    for row_idx, row in enumerate(raw_rows, start=2):
+        for h_raw, h in zip(raw_headers, headers):
+            cell = (row.get(h_raw) or "").strip()
+            if cell == "" or cell.lower() in ("nan", "na", "null", "none"):
+                if missing_policy == "raise":
+                    raise ValueError(f"Missing value in '{src.name}' row {row_idx}, column '{h}'.")
+                parsed_cols[h].append(None)
+            else:
+                try:
+                    parsed_cols[h].append(float(cell))
+                except ValueError as exc:
+                    if allow_string_columns:
+                        is_string_col[h] = True
+                        parsed_cols[h].append(cell)
+                    elif missing_policy == "raise":
+                        raise ValueError(
+                            f"Non-numeric value '{cell}' in '{src.name}' row {row_idx}, column '{h}'."
+                        ) from exc
+                    else:
+                        parsed_cols[h].append(None)
+
+    n_rows = len(raw_rows)
+    keep_mask = np.ones(n_rows, dtype=bool)
+    if missing_policy == "drop":
+        for h in headers:
+            for i, v in enumerate(parsed_cols[h]):
+                if v is None or (isinstance(v, float) and not np.isfinite(v)):
+                    keep_mask[i] = False
+
+    out: Dict[str, Any] = {}
+    for h in headers:
+        col_vals = [v for i, v in enumerate(parsed_cols[h]) if keep_mask[i]]
+        if is_string_col[h]:
+            out[h] = ["" if v is None else str(v) for v in col_vals]
+        else:
+            out[h] = np.asarray(
+                [float("nan") if v is None else float(v) for v in col_vals],
+                dtype=float,
+            )
+    return out
+
+
 @dataclass
 class Dataset(ResultMixin):
     """
@@ -120,6 +195,40 @@ class Dataset(ResultMixin):
         np.savez(out, **self.as_dict())
         return out
 
+    def to_hdf5(self, path: Union[str, Path], *, group: str = "/") -> Path:
+        """Write dataset to a structured HDF5 file (requires optional ``rosolver[io]`` / ``h5py``)."""
+        try:
+            import h5py  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise ImportError(
+                "Writing HDF5 files requires the optional 'io' dependency: pip install 'rosolver[io]' (h5py)."
+            ) from exc
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(out, "w") as fh:
+            grp = fh if group in ("/", "") else fh.require_group(group)
+            grp.attrs["name"] = self.name
+            if self.units:
+                grp.attrs["units"] = json.dumps(to_jsonable(self.units))
+            if self.mesh_metadata:
+                grp.attrs["mesh_metadata"] = json.dumps(to_jsonable(self.mesh_metadata))
+            if self.solver_metadata:
+                grp.attrs["solver_metadata"] = json.dumps(to_jsonable(self.solver_metadata))
+            if self.coordinates:
+                cg = grp.require_group("coordinates")
+                for k, arr in self.coordinates.items():
+                    cg.create_dataset(k, data=np.asarray(arr, dtype=float))
+            if self.fields:
+                fg = grp.require_group("fields")
+                for k, arr in self.fields.items():
+                    fg.create_dataset(k, data=np.asarray(arr, dtype=float))
+            if self.uncertainties:
+                ug = grp.require_group("uncertainties")
+                for k, arr in self.uncertainties.items():
+                    ug.create_dataset(k, data=np.asarray(arr, dtype=float))
+        return out
+
     @classmethod
     def from_mapping(
         cls,
@@ -137,8 +246,8 @@ class Dataset(ResultMixin):
         initial_conditions: Optional[Mapping[str, Any]] = None,
         provenance: Optional[Mapping[str, Any]] = None,
     ) -> "Dataset":
-        if missing_policy not in ("raise", "drop", "nan"):
-            raise ValueError("missing_policy must be 'raise', 'drop', or 'nan'.")
+        if missing_policy not in ("raise", "drop", "nan", "mask"):
+            raise ValueError("missing_policy must be 'raise', 'drop', 'nan', or 'mask'.")
         if not raw_cols:
             raise ValueError("Cannot construct Dataset from empty data.")
 
@@ -225,8 +334,8 @@ class Dataset(ResultMixin):
         mesh_metadata: Optional[Mapping[str, Any]] = None,
         solver_metadata: Optional[Mapping[str, Any]] = None,
     ) -> "Dataset":
-        if missing_policy not in ("raise", "drop", "nan"):
-            raise ValueError("missing_policy must be 'raise', 'drop', or 'nan'.")
+        if missing_policy not in ("raise", "drop", "nan", "mask"):
+            raise ValueError("missing_policy must be 'raise', 'drop', 'nan', or 'mask'.")
         src = Path(path)
         if not src.exists():
             raise FileNotFoundError(f"CSV file not found: '{src}'.")

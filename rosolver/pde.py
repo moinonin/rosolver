@@ -350,8 +350,11 @@ class ConservationLaw1D:
             t, Y, dt_used, n_steps, nfev = sol.t, sol.y.T, None, len(sol.t) - 1, int(sol.nfev)
 
         Us = Y[:, :mN].reshape(len(t), m, N)
+        finite_ok = bool(np.all(np.isfinite(Us)))
+        if not finite_ok:
+            warnings.append(f"PDE solver '{scheme}' diverged to non-finite values (Inf/NaN); reduce dt/cfl.")
         cfl_max = float("nan")
-        if dt_used is not None:
+        if dt_used is not None and finite_ok:
             cfl_max = float(max(dt_used * fv.max_rate(Us[i], t[i]) for i in range(len(t))))
         U = {f: Us[:, k, :] for k, f in enumerate(self.fields)}
         budget = {}
@@ -366,7 +369,7 @@ class ConservationLaw1D:
             fields=list(self.fields), x=fv.xc, edges=fv.xf, t=np.asarray(t), U=U, h=fv.h,
             scheme=scheme, reconstruction=reconstruction, dt=dt_used, n_steps=n_steps, nfev=nfev,
             cfl_max=cfl_max, formal_order=1 if reconstruction == "constant" else 2, budget=budget,
-            success=(newton_failures == 0), newton_failures=newton_failures, warnings=warnings,
+            success=(newton_failures == 0 and finite_ok), newton_failures=newton_failures, warnings=warnings,
         )
 
 
@@ -384,6 +387,7 @@ class _Compiled:
         self.diff_fn = sp.lambdify(args, diff, "numpy")
         self.src_fn = sp.lambdify(args, src, "numpy")
         self.jac_fn = sp.lambdify(args, sp.Matrix(flux).jacobian(law.field_syms).tolist(), "numpy")
+        self.src_jac_fn = sp.lambdify(args, sp.Matrix(src).jacobian(law.field_syms).tolist(), "numpy")
 
     @staticmethod
     def _stack(vals, n: int) -> np.ndarray:
@@ -397,6 +401,19 @@ class _Compiled:
 
     def source(self, U, x, t):
         return self._stack(self.src_fn(*U, x, t), U.shape[1])
+
+    def source_rate(self, U, x, t) -> np.ndarray:
+        n = U.shape[1]
+        if not self.has_src:
+            return np.zeros(n)
+        J = self.src_jac_fn(*U, x, t)
+        if self.m == 1:
+            return np.abs(np.broadcast_to(np.asarray(J[0][0], dtype=float), (n,)))
+        arr = np.empty((self.m, self.m, n))
+        for i in range(self.m):
+            for j in range(self.m):
+                arr[i, j] = np.broadcast_to(np.asarray(J[i][j], dtype=float), (n,))
+        return np.abs(np.linalg.eigvals(np.moveaxis(arr, 2, 0))).max(axis=1)
 
     def speed(self, U, x, t) -> np.ndarray:
         n = U.shape[1]
@@ -446,7 +463,7 @@ class _FVM:
             if missing:
                 raise KeyError(f"{label}: missing value for field(s) {missing}.")
             return [spec[f] for f in self.law.fields]
-        if isinstance(spec, (list, tuple)) and len(spec) == m and m > 1:
+        if isinstance(spec, (list, tuple)) and len(spec) == m:
             return list(spec)
         return [spec] * m
 
@@ -557,10 +574,11 @@ class _FVM:
         return np.concatenate([dU.ravel(), F[:, 0], F[:, -1], self.h * S.sum(axis=1)])
 
     def max_rate(self, U: np.ndarray, t: float) -> float:
-        """a_max/h + 2 D_max/h^2: dt * max_rate is the effective CFL/Fourier number."""
+        """a_max/h + 2 D_max/h^2 + |dS/dU|_max: dt * max_rate is the effective CFL/Fourier/Damkohler number."""
         a = float(np.max(self.c.speed(U, self.xc, t))) if self.c.has_flux else 0.0
         D = float(np.max(np.abs(self.c.diffusivity(U, self.xc, t)))) if self.c.has_diff else 0.0
-        return a / self.h + 2.0 * D / self.h ** 2
+        s = float(np.max(self.c.source_rate(U, self.xc, t))) if self.c.has_src else 0.0
+        return a / self.h + 2.0 * D / self.h ** 2 + s
 
     def sparsity(self):
         m, N = self.m, self.N

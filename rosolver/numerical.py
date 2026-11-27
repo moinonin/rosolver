@@ -226,11 +226,17 @@ class NumericalSolver:
             raise TypeError(f"Unsupported model type: {type(model)}")
 
         if free_params is not None:
-            sym_pool = {str(s): s for s in rhs.free_symbols}
-            params = [
-                sym_pool[p] if isinstance(p, str) and p in sym_pool else (sp.Symbol(p, real=True) if isinstance(p, str) else p)
-                for p in free_params
-            ]
+            sym_pool = {s.name: s for s in rhs.free_symbols if isinstance(s, sp.Symbol)}
+            resolved_p: List[sp.Symbol] = []
+            for p in free_params:
+                p_name = p.name if isinstance(p, sp.Symbol) else str(p)
+                if p_name in sym_pool:
+                    resolved_p.append(sym_pool[p_name])
+                elif isinstance(p, sp.Symbol):
+                    resolved_p.append(p)
+                else:
+                    resolved_p.append(sp.Symbol(p_name, real=True))
+            params = resolved_p
 
         return name, lhs, rhs, params  # type: ignore[return-value]
 
@@ -410,8 +416,8 @@ class NumericalSolver:
         parameters (without bounds), and analytic-Jacobian Trust-Region Nonlinear Least Squares
         otherwise. Evaluates Jacobian conditioning, rank, correlation, and confidence intervals.
         """
-        if missing_policy not in ("raise", "drop", "mask"):
-            raise ValueError(f"Invalid missing_policy '{missing_policy}'. Choose 'raise', 'drop', or 'mask'.")
+        if missing_policy not in ("raise", "drop", "mask", "nan"):
+            raise ValueError(f"Invalid missing_policy '{missing_policy}'. Choose 'raise', 'drop', 'mask', or 'nan'.")
         if weights is not None and sigma_y is not None:
             raise ValueError("Provide either `weights` or `sigma_y`, not both.")
         if not 0.0 < confidence_level < 1.0:
@@ -481,11 +487,12 @@ class NumericalSolver:
             valid_mask &= col_ok
 
         n_dropped = int(n_raw - np.count_nonzero(valid_mask))
+        pad_mask = valid_mask.copy() if (n_dropped > 0 and missing_policy in ("mask", "nan")) else None
         if n_dropped > 0:
             if missing_policy == "raise":
                 raise ValueError(
                     f"Non-finite (NaN/Inf) entries found in column(s) {bad_cols} "
-                    f"({n_dropped} row(s)); set missing_policy='drop' to omit incomplete rows."
+                    f"({n_dropped} row(s)); set missing_policy='drop' or 'mask' to handle incomplete rows."
                 )
             y = y[valid_mask]
             x_arrays = [arr[valid_mask] for arr in x_arrays]
@@ -521,7 +528,8 @@ class NumericalSolver:
             obj_val = float(np.sum((sqrt_w * (y - preds)) ** 2))
             return cls._build_fit_result(
                 cand_name, lhs_sym, rhs, {}, {}, y, preds, True, "No free parameters.", clean_tol,
-                weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+                weighted=is_weighted, sqrt_w=sqrt_w if is_weighted else None, pad_mask=pad_mask,
+                objective_value=obj_val, n_dropped_missing=n_dropped,
                 optimizer_config={"method": "direct_eval", "loss": loss, "weighted": is_weighted},
                 warnings=fit_warnings,
             )
@@ -570,7 +578,8 @@ class NumericalSolver:
                 f"Exact {method_name} fit.", clean_tol,
                 confidence_intervals=ci_dict, covariance_matrix=cov,
                 correlation_matrix=id_rep.correlation_matrix, identifiability=id_rep,
-                weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+                weighted=is_weighted, sqrt_w=sqrt_w if is_weighted else None, pad_mask=pad_mask,
+                objective_value=obj_val, n_dropped_missing=n_dropped,
                 optimizer_config={"method": method_name, "loss": loss, "weighted": is_weighted, "missing_policy": missing_policy},
                 warnings=all_warnings,
             )
@@ -707,7 +716,8 @@ class NumericalSolver:
             bool(best_opt.success), best_opt.message, clean_tol,
             confidence_intervals=ci_dict, covariance_matrix=cov,
             correlation_matrix=id_rep.correlation_matrix, identifiability=id_rep,
-            weighted=is_weighted, objective_value=obj_val, n_dropped_missing=n_dropped,
+            weighted=is_weighted, sqrt_w=sqrt_w if is_weighted else None, pad_mask=pad_mask,
+            objective_value=obj_val, n_dropped_missing=n_dropped,
             optimizer_config={
                 "method": method_name,
                 "loss": loss,
@@ -1135,7 +1145,7 @@ class NumericalSolver:
                 t_segments.append(np.array([t_ev]))
                 y_segments.append(np.array([y_post]))
                 y_curr = y_post
-                t_curr = t_ev + 1e-9
+                t_curr = t_ev + max(1e-12 * max(abs(t_end - float(span[0])), abs(t_ev)), 1e-15)
             else:
                 t_segments.append(sol.t)
                 y_segments.append(sol.y[0])
@@ -1268,6 +1278,8 @@ class NumericalSolver:
         correlation_matrix: Optional[np.ndarray] = None,
         identifiability: Optional[IdentifiabilityReport] = None,
         weighted: bool = False,
+        sqrt_w: Optional[np.ndarray] = None,
+        pad_mask: Optional[np.ndarray] = None,
         objective_value: Optional[float] = None,
         n_dropped_missing: int = 0,
         optimizer_config: Optional[Dict[str, Any]] = None,
@@ -1276,16 +1288,53 @@ class NumericalSolver:
         n_obs = y.size
         k = len(p_dict)
         residuals = y - preds
-        sse = float(np.sum(residuals ** 2))
-        sst = float(np.sum((y - np.mean(y)) ** 2))
-        r2 = 1.0 - (sse / sst) if sst > 0 else (1.0 if sse < 1e-24 else 0.0)
-        rmse = float(np.sqrt(sse / n_obs))
-        mae = float(np.mean(np.abs(residuals)))
+        out_warnings = list(warnings or [])
 
-        mse_floor = max(sse / n_obs, 1e-30)
-        log_lik = -0.5 * n_obs * (np.log(2 * np.pi * mse_floor) + 1.0)
-        aic = float(2 * k - 2 * log_lik)
-        bic = float(k * np.log(max(n_obs, 1)) - 2 * log_lik)
+        if weighted and sqrt_w is not None:
+            w_raw = sqrt_w ** 2
+            w_mean = float(np.mean(w_raw))
+            w_norm = w_raw / w_mean if w_mean > 0.0 else np.ones_like(w_raw)
+            y_bar = float(np.sum(w_raw * y) / np.sum(w_raw)) if np.sum(w_raw) > 0.0 else float(np.mean(y))
+            sse_w = float(np.sum(w_norm * (residuals ** 2)))
+            sst_w = float(np.sum(w_norm * ((y - y_bar) ** 2)))
+            r2 = 1.0 - (sse_w / sst_w) if sst_w > 0.0 else (1.0 if sse_w < 1e-24 else 0.0)
+            rmse = float(np.sqrt(sse_w / n_obs))
+            mae = float(np.sum(w_norm * np.abs(residuals)) / n_obs)
+            c2_hat = max(float(np.mean(w_raw * (residuals ** 2))), 1e-30)
+            sum_log_w = float(np.sum(np.log(np.maximum(w_raw, 1e-300))))
+            log_lik = -0.5 * n_obs * (np.log(2.0 * np.pi * c2_hat) + 1.0) + 0.5 * sum_log_w
+            sse_default = float(np.sum(w_raw * (residuals ** 2)))
+        else:
+            sse = float(np.sum(residuals ** 2))
+            sst = float(np.sum((y - np.mean(y)) ** 2))
+            r2 = 1.0 - (sse / sst) if sst > 0 else (1.0 if sse < 1e-24 else 0.0)
+            rmse = float(np.sqrt(sse / n_obs))
+            mae = float(np.mean(np.abs(residuals)))
+            mse_floor = max(sse / n_obs, 1e-30)
+            log_lik = -0.5 * n_obs * (np.log(2 * np.pi * mse_floor) + 1.0)
+            sse_default = sse
+
+        underdetermined = k > 0 and n_obs <= k
+        if underdetermined:
+            aic = float("inf")
+            bic = float("inf")
+            se_dict = {nm: float("nan") for nm in p_dict}
+            msg_ud = f"Saturated/underdetermined fit (n_obs={n_obs} <= n_params={k}): AIC/BIC set to inf."
+            if msg_ud not in out_warnings:
+                out_warnings.append(msg_ud)
+        else:
+            aic = float(2 * k - 2 * log_lik)
+            bic = float(k * np.log(max(n_obs, 1)) - 2 * log_lik)
+
+        if pad_mask is not None:
+            full_len = int(pad_mask.size)
+            preds_out = np.full(full_len, np.nan, dtype=float)
+            res_out = np.full(full_len, np.nan, dtype=float)
+            preds_out[pad_mask] = preds
+            res_out[pad_mask] = residuals
+        else:
+            preds_out = preds
+            res_out = residuals
 
         sym_map = {str(s): s for s in rhs.free_symbols}
         subs_cal: Dict[sp.Symbol, sp.Expr] = {}
@@ -1304,6 +1353,8 @@ class NumericalSolver:
 
         if not converged:
             tier = "fit_failed"
+        elif underdetermined:
+            tier = "underdetermined"
         elif identifiability is not None and not identifiability.identifiable:
             tier = "identifiability_warning"
         else:
@@ -1320,8 +1371,8 @@ class NumericalSolver:
             bic=bic,
             n_obs=n_obs,
             calibrated_equation=cal_eq,
-            predictions=preds,
-            residuals=residuals,
+            predictions=preds_out,
+            residuals=res_out,
             converged=converged,
             message=message,
             confidence_intervals=dict(confidence_intervals or {}),
@@ -1329,9 +1380,9 @@ class NumericalSolver:
             correlation_matrix=correlation_matrix,
             identifiability=identifiability,
             weighted=weighted,
-            objective_value=sse if objective_value is None else objective_value,
+            objective_value=sse_default if objective_value is None else objective_value,
             n_dropped_missing=n_dropped_missing,
             optimizer_config=dict(optimizer_config or {}),
-            warnings=list(warnings or []),
+            warnings=out_warnings,
             admissibility_tier=tier,
         )

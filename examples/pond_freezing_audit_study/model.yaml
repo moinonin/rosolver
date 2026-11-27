@@ -1,0 +1,119 @@
+model:
+  name: pond_layer_freezing_audit
+  version: "1.0"
+  domain: environmental_phase_change
+  description: >
+    Independent physics & numerical verification study of docs/refs/new_icd_study.txt
+    (10x10 m winter pond freeze crystallization, rho=917 kg/m^3, Delta_H=3.34e5 J/kg,
+    u=2 m/s, Delta_T=-1 C, J=7.96412e-6 kg/(m^2*s), t=72000 s, n=12).
+variables:
+  independent:
+    - name: t
+      symbol: t
+      unit: s
+      description: Elapsed winter freezing time (0 to 72000 s = 20 hr)
+  dependent:
+    - name: delta_full
+      symbol: delta_full
+      unit: m
+      positive: true
+      description: Top-down ice layer thickness under coupled convection + Table 1 vapor flux J
+    - name: delta_conv
+      symbol: delta_conv
+      unit: m
+      positive: true
+      description: Top-down ice layer thickness under sensible wind convection only (J = 0)
+    - name: Q_lat_full
+      symbol: Q_lat_full
+      unit: J/m^2
+      description: Cumulative latent freezing energy extracted per unit pond area (conserves Q_lat - rho*Lf*delta)
+    - name: E_rem_full
+      symbol: E_rem_full
+      unit: J/m^2
+      description: Remaining thermal energy budget relative to reference cap Q_cap (conserves Q_lat_full + E_rem_full = Q_cap)
+parameters:
+  - name: rho
+    symbol: rho
+    unit: kg/m^3
+    status: fixed
+    value: 917.0
+    description: Solid ice Ih density (Table 1)
+  - name: Lf
+    symbol: Lf
+    unit: J/kg
+    status: fixed
+    value: 3.34e5
+    description: "Latent heat of freezing of H2O (Table 1: 3.34e5 J/kg)"
+  - name: k_ice
+    symbol: k_ice
+    unit: W/(m*K)
+    status: fixed
+    value: 2.22
+    description: "Thermal conductivity of ice Ih near 0 C"
+  - name: h_c
+    symbol: h_c
+    unit: W/(m^2*K)
+    status: fixed
+    value: 13.3
+    description: "Convective air-ice heat transfer coefficient at u = 2 m/s (Jurges: 5.7 + 3.8*u)"
+  - name: dT
+    symbol: dT
+    unit: K
+    status: fixed
+    value: 1.0
+    description: "Freezing driving temperature difference T_f - T_air (Table 1: -1 C)"
+  - name: J_evap
+    symbol: J_evap
+    unit: kg/(m^2*s)
+    status: fixed
+    value: 7.96412e-6
+    description: "Table 1 initialization vapor mass flux J (7.96412e-6 kg m^-2 s^-1)"
+  - name: L_sub
+    symbol: L_sub
+    unit: J/kg
+    status: fixed
+    value: 2.835e6
+    description: Latent heat of sublimation/evaporation at ice-air interface (Lf + Lv)
+equations:
+  - id: full_pond_ode
+    type: ode
+    expression: "ddelta_full/dt = (h_c * dT + J_evap * L_sub) / (rho * Lf * (1.0 + h_c * delta_full / k_ice))"
+    description: Coupled Ashton top-down lake-ice growth with wind convection and Table 1 evaporative flux J
+  - id: conv_only_ode
+    type: ode
+    expression: "ddelta_conv/dt = (h_c * dT) / (rho * Lf * (1.0 + h_c * delta_conv / k_ice))"
+    description: Sensible wind-convection-only ice growth (J = 0 baseline)
+  - id: latent_energy_ode
+    type: ode
+    expression: "dQ_lat_full/dt = (h_c * dT + J_evap * L_sub) / (1.0 + h_c * delta_full / k_ice)"
+    description: Cumulative latent freezing energy per unit area (exact balance dQ_lat/dt = rho*Lf*ddelta/dt)
+  - id: energy_reservoir_ode
+    type: ode
+    expression: "dE_rem_full/dt = -(h_c * dT + J_evap * L_sub) / (1.0 + h_c * delta_full / k_ice)"
+    description: Complementary energy ledger state conserving Q_lat_full + E_rem_full
+conditions:
+  initial:
+    - kind: initial
+      field: delta_full
+      value: 0.0001
+    - kind: initial
+      field: delta_conv
+      value: 0.0001
+    - kind: initial
+      field: Q_lat_full
+      value: 30.6278
+    - kind: initial
+      field: E_rem_full
+      value: 9999969.3722
+  boundary: []
+numerics:
+  solver: ODESystem
+  time_integrator: rk4
+  dt: 600.0
+  tolerances:
+    rtol: 1.0e-10
+    atol: 1.0e-13
+assumptions:
+  - Quasi-steady conduction inside ice (Stefan number Ste = cp*dT/Lf = 0.0063 << 1).
+  - Top-down winter pond freezing over 10x10 m area (sigma = 100 m^2) with Table 1 parameters.
+  - Physical vapor pressure gradient acts via evaporative/sublimative latent cooling J*L_sub, not via inviscid Euler acceleration rho*a + grad(P_v) = 0.

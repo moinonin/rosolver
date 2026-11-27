@@ -42,6 +42,7 @@ _PROJECT_DIRS: Tuple[str, ...] = (
     "verification/conservation",
     "verification/timestep",
     "validation/results",
+    "claims/rounds",
     "reports/figures",
     "reports/tables",
     "logs",
@@ -58,6 +59,11 @@ _RUN_SUBDIRS: Dict[str, str] = {
     "conservation": "verification/conservation",
     "timestep": "verification/timestep",
     "validation": "validation/results",
+    "claim_audit": "claims",
+    "claim_scale_audit": "claims",
+    "claim_normalization_audit": "claims",
+    "claim_scaling_audit": "claims",
+    "claim_budget_audit": "claims",
 }
 
 
@@ -102,16 +108,30 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _load_calibration_dataset(path: Path) -> Dict[str, np.ndarray]:
+    """Load a registered project dataset (.csv, .json, .yaml, .npz, .h5) with strict row alignment."""
+    from .data import Dataset, load_tabular_csv
+
+    suf = path.suffix.lower()
+    if suf == ".json":
+        ds = Dataset.from_json(path)
+        return {**ds.coordinates, **ds.fields, **{f"u_{k}": v for k, v in ds.uncertainties.items()}}
+    if suf in (".yaml", ".yml"):
+        ds = Dataset.from_yaml(path)
+        return {**ds.coordinates, **ds.fields, **{f"u_{k}": v for k, v in ds.uncertainties.items()}}
+    if suf == ".npz":
+        ds = Dataset.from_numpy(path)
+        return {**ds.coordinates, **ds.fields, **{f"u_{k}": v for k, v in ds.uncertainties.items()}}
+    if suf in (".h5", ".hdf5"):
+        ds = Dataset.from_hdf5(path)
+        return {**ds.coordinates, **ds.fields, **{f"u_{k}": v for k, v in ds.uncertainties.items()}}
+    raw = load_tabular_csv(path, missing_policy="raise", allow_string_columns=True)
+    return {k: v for k, v in raw.items() if isinstance(v, np.ndarray)}
+
+
 def _load_csv_data(path: Path) -> Dict[str, np.ndarray]:
-    cols: Dict[str, List[float]] = {}
-    with path.open("r", newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            for k, v in row.items():
-                if k is None or v is None or v.strip() == "":
-                    continue
-                cols.setdefault(k.strip(), []).append(float(v))
-    return {k: np.asarray(vals, dtype=float) for k, vals in cols.items()}
+    """Backwards-compatible alias delegating to row-aligned `_load_calibration_dataset`."""
+    return _load_calibration_dataset(path)
 
 
 @dataclass
@@ -237,6 +257,17 @@ class Project:
             "reports": [],
         }
         proj = cls(root, manifest)
+        if overwrite:
+            if proj.ledger_path.exists():
+                proj.ledger_path.write_text("", encoding="utf-8")
+            if proj.log_path.exists():
+                proj.log_path.write_text("", encoding="utf-8")
+            claims_dir = root / "claims"
+            if claims_dir.exists():
+                for child in (claims_dir / "rounds").glob("*.json"):
+                    child.unlink(missing_ok=True)
+                for f_name in ("manifest.yaml", "clarifications_open.json"):
+                    (claims_dir / f_name).unlink(missing_ok=True)
         proj._save_manifest()
         proj.ledger_path.touch(exist_ok=True)
         proj._append_log(f"Project '{proj.name}' ({proj.project_id}) initialized.")
@@ -271,14 +302,25 @@ class Project:
     # ------------------------------------------------------------------ models & datasets
     def add_model(self, model: Model, *, filename: Optional[str] = None) -> ModelRef:
         model.validate(strict=True)
+        resolved_sub_rel: Optional[Path] = None
+        if filename is not None:
+            models_root = (self.root / "models").resolve()
+            cand_dest = (models_root / filename).resolve()
+            try:
+                resolved_sub_rel = cand_dest.relative_to(models_root)
+            except ValueError as exc:
+                raise ProjectError(
+                    f"Model filename '{filename}' escapes the project 'models/' directory."
+                ) from exc
+
         c_hash = model.content_hash()
         existing = self.models
         for m in existing:
             if m.name == model.name and m.version == model.version and m.content_hash == c_hash:
                 return m
 
-        if filename is not None:
-            rel_path = Path("models") / filename
+        if resolved_sub_rel is not None:
+            rel_path = Path("models") / resolved_sub_rel
         else:
             conflict = any(
                 m.name == model.name and m.version == model.version and m.content_hash != c_hash
@@ -752,6 +794,24 @@ class Project:
         self._manifest["reports"] = reports_list
         self._save_manifest()
         return rep
+
+    def register_claim_manifest(self, manifest: Any) -> Path:
+        """Persist a validated `ClaimManifest` into `<project>/claims/manifest.yaml`."""
+        from .claims import ClaimAuditEngine
+
+        return ClaimAuditEngine.register_manifest(self, manifest)
+
+    def audit_claims(self, manifest: Optional[Any] = None) -> Any:
+        """Execute a deterministic claim-verification audit round on this project."""
+        from .claims import ClaimAuditEngine
+
+        return ClaimAuditEngine.run_round(self, manifest=manifest)
+
+    def submit_rebuttal(self, submissions: Sequence[Any]) -> Any:
+        """Ingest author rebuttals against open clarification requests and run Round k+1."""
+        from .claims import ClaimAuditEngine
+
+        return ClaimAuditEngine.submit_rebuttal(self, submissions)
 
     def summary(self) -> str:
         inf = self.info()

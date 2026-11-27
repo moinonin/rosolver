@@ -350,7 +350,7 @@ def gci_from_values(
     failed_reasons: List[str] = []
     if gci21 > gci_tol:
         failed_reasons.append(f"GCI_fine {gci21:.4g} exceeds tolerance {gci_tol:.4g}.")
-    if formal_order is not None and regime == "monotonic" and abs(p_obs - formal_order) > order_tol:
+    if formal_order is not None and regime in ("monotonic", "oscillatory") and abs(p_obs - formal_order) > order_tol:
         failed_reasons.append(
             f"Observed order {p_obs:.2f} deviates from formal order {formal_order:.2f} by > {order_tol}."
         )
@@ -913,12 +913,14 @@ def audit_hybrid_conservation(
     ev_idx = 0
     evs = sol.events
     running_shed = 0.0
+    t_span_scale = max(abs(float(t[-1]) - float(t[0])) if len(t) >= 2 else 0.0, 1e-15)
     for i in range(len(t)):
         if (
             ev_idx < len(evs)
             and i > 0
-            and abs(t[i] - t[i - 1]) < 1e-12
-            and abs((y[i - 1] - y[i]) - evs[ev_idx].shed_amount) < 1e-9
+            and abs(t[i] - t[i - 1]) <= 1e-10 * t_span_scale
+            and abs((y[i - 1] - y[i]) - evs[ev_idx].shed_amount)
+            <= 1e-7 * max(abs(evs[ev_idx].shed_amount), abs(float(y[i - 1])), 1.0)
         ):
             running_shed += evs[ev_idx].shed_amount
             ev_idx += 1
@@ -1173,7 +1175,12 @@ def cosimulate_coupled_odes(
     """
     if mode not in ("loose", "strong"):
         raise ValueError("mode must be 'loose' or 'strong'.")
-    base_params = {k: float(v) for k, v in (params or {}).items()}
+    overlap = set(sys_a.states) & set(sys_b.states)
+    if overlap:
+        raise ValueError(f"Coupled ODE systems must have disjoint state names; overlap={sorted(overlap)}.")
+    base_params: Dict[str, Any] = {
+        k: (v if callable(v) else float(v)) for k, v in (params or {}).items()
+    }
 
     # Build monolithic reference system
     mono_rhs = {

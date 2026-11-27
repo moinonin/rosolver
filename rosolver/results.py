@@ -250,6 +250,23 @@ def standardize_result(
 ) -> StandardResult:
     """Wrap any Rosolver computational output into a `StandardResult`."""
     if isinstance(raw, StandardResult):
+        if kind is not None:
+            raw.kind = kind
+            raw.metadata.kind = kind
+        if model_name is not None:
+            raw.metadata.model_name = model_name
+        if model_version is not None:
+            raw.metadata.model_version = model_version
+        if run_id is not None:
+            raw.metadata.run_id = run_id
+        if timing_s is not None:
+            raw.metadata.timing_s = timing_s
+        if solver_config:
+            raw.metadata.solver_config.update(to_jsonable(dict(solver_config)))
+        if units:
+            raw.metadata.units.update({str(k): str(v) for k, v in units.items()})
+        if assumptions:
+            raw.metadata.assumptions = list(dict.fromkeys(raw.metadata.assumptions + [str(a) for a in assumptions]))
         return raw
 
     inferred_kind = kind or type(raw).__name__

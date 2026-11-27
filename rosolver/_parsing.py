@@ -19,6 +19,7 @@ ExprLike = Union[str, int, float, sp.Basic]
 
 _MAX_EXPR_LENGTH = 10_000
 _MAX_AST_NODES = 500
+_MAX_EXPONENT_MAGNITUDE = 1024
 
 _CALLABLE_FUNCS: Dict[str, Callable[..., sp.Expr]] = {
     name: getattr(sp, name)
@@ -89,7 +90,18 @@ def _eval_ast(node: ast.AST, symbols: Mapping[str, sp.Symbol]) -> sp.Expr:
         op_fn = _BIN_OPS.get(type(node.op))
         if op_fn is None:
             raise ValueError(f"Disallowed binary operator: {type(node.op).__name__}.")
-        return op_fn(_eval_ast(node.left, symbols), _eval_ast(node.right, symbols))
+        left_val = _eval_ast(node.left, symbols)
+        right_val = _eval_ast(node.right, symbols)
+        if isinstance(node.op, ast.Pow) and right_val.is_number:
+            try:
+                exp_mag = abs(float(right_val))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Exponent magnitude overflow in expression.") from exc
+            if not np.isfinite(exp_mag) or exp_mag > _MAX_EXPONENT_MAGNITUDE:
+                raise ValueError(
+                    f"Exponent magnitude {right_val} exceeds maximum safe bound ({_MAX_EXPONENT_MAGNITUDE})."
+                )
+        return op_fn(left_val, right_val)
 
     if isinstance(node, ast.Call):
         if not isinstance(node.func, ast.Name):

@@ -218,16 +218,29 @@ class ODESystem:
                 raise ValueError(f"Fixed-step scheme '{method}' requires dt.")
             res = integrate_fixed(f, t_span, y0v, dt, scheme=method, n_out=n_out if t_eval is None else None,
                                   jac=self.jac_function(params))
-            ok = res.newton_failures == 0
-            warns = (
-                [f"Fixed-step implicit solver '{res.scheme}' encountered {res.newton_failures} Newton convergence failure(s)."]
-                if not ok
-                else []
-            )
+            finite_ok = (not res.diverged) and bool(np.all(np.isfinite(res.y)))
+            ok = (res.newton_failures == 0) and finite_ok
+            warns: List[str] = []
+            if res.newton_failures > 0:
+                warns.append(
+                    f"Fixed-step implicit solver '{res.scheme}' encountered {res.newton_failures} Newton convergence failure(s)."
+                )
+            if not finite_ok:
+                warns.append(
+                    f"Fixed-step solver '{res.scheme}' diverged to non-finite values (Inf/NaN); reduce dt or use an implicit solver."
+                )
             msg = "fixed-step" if ok else warns[0]
             if raise_on_failure and not ok:
                 raise RuntimeError(msg)
-            return Trajectory(res.t, res.y, list(self.states), res.scheme, res.nfev, ok,
+            t_out, y_out = res.t, res.y
+            if t_eval is not None:
+                te_arr = np.asarray(t_eval, dtype=float).reshape(-1)
+                span_tol = 1e-12 * max(abs(float(t_span[1]) - float(t_span[0])), 1.0)
+                if te_arr.size > 0 and (float(np.min(te_arr)) < float(t_span[0]) - span_tol or float(np.max(te_arr)) > float(t_span[1]) + span_tol):
+                    raise ValueError("All `t_eval` entries must lie within `t_span`.")
+                y_interp = np.column_stack([np.interp(te_arr, res.t, res.y[:, j]) for j in range(res.y.shape[1])])
+                t_out, y_out = te_arr, y_interp
+            return Trajectory(t_out, y_out, list(self.states), res.scheme, res.nfev, ok,
                               msg, dt=res.dt, newton_failures=res.newton_failures, warnings=warns)
         te = np.linspace(t_span[0], t_span[1], (n_out or 200) + 1) if t_eval is None else np.asarray(t_eval)
         kw: Dict[str, object] = {"jac": self.jac_function(params)} if method in _IMPLICIT_SCIPY else {}
@@ -292,6 +305,16 @@ class ODESystem:
         missing = [p for p in pnames if p not in params]
         if missing:
             raise KeyError(f"Missing values for parameters {missing}.")
-        pvals = [params[p](traj.t) if callable(params[p]) else float(params[p]) for p in pnames]
+        pvals = []
+        for p in pnames:
+            pv = params[p]
+            if callable(pv):
+                try:
+                    arr_p = np.broadcast_to(np.asarray(pv(traj.t), dtype=float), traj.t.shape).copy()
+                except (TypeError, ValueError):
+                    arr_p = np.array([float(pv(float(ti))) for ti in traj.t], dtype=float)
+                pvals.append(arr_p)
+            else:
+                pvals.append(float(pv))
         out = fn(traj.t, *traj.y.T, *pvals)
         return np.broadcast_to(np.asarray(out, dtype=float), traj.t.shape).copy()

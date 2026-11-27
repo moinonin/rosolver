@@ -1,9 +1,9 @@
 # **Rosolver — Pre-Implementation Audit & Sprint Implementation Roadmap**
 
 **Companion spec:** [`ENG_SPEC.md`](ENG_SPEC.md)  
-**Audit date:** 2026-11-26  
+**Audit date:** 2026-11-26 (Updated: 2026-11-27 — Sprint 10 Priority Track & Sprint 8/9 Rescope)  
 **Baseline:** Rosolver `v0.1.0` (`68` passing tests, Python `3.11.13`)  
-**Current Release Status:** `v0.2.0` (`150` passing tests) — **Sprints 0–7 Completed**; **Sprints 8–9 Deferred (`v0.3+` / `v0.4+`)**
+**Current Release Status:** `v0.2.0` + **Sprints 0–10 & Carbon Audit Hardening All Complete** (`183` passing tests incl. `rosolver.claims`, OpenFOAM/FEniCSx/HDF5 adapters, headless LaTeX/PDF renderer, PySR `CandidateImporter`, `rosolver-mcp` `15` tools & `CARBON_AUDIT.md` fixes)
 
 ---
 
@@ -19,8 +19,11 @@
 | **Sprint 5** | `Dataset` I/O, `SolverAdapter`/`VerificationStudy` & `ValidationStudy` | `P2.2`–`P2.4` | ✅ **Completed** |
 | **Sprint 6** | Scientific Reporting Engine, 9-Command Workflow CLI & Jupyter Hooks | `P3.1`, `P3.2` | ✅ **Completed** |
 | **Sprint 7** | Flagship Heat-Transfer Demo, Modular Subpackages, Docs & `v0.2.0` Gate | `P3.3`, `P4.1`–`P4.4` | ✅ **Completed** |
-| **Sprint 8** | PySide6 Desktop App, FiPy/FEniCSx/OpenFOAM Adapters & PDF Export | `P5.1`, `P2.3+` | ⏳ **Deferred (`v0.3+`)** |
-| **Sprint 9** | AI-Assisted Model Formulation & PySR Symbolic Regression Ingestion | `P5.2`, `P5.3` | ⏳ **Deferred (`v0.4+`)** |
+| **`v0.2` MCP Extension** | Zero-Dependency `rosolver-mcp` Server (`10` Tools, `4` Resources, `2` Prompts) | `P3.2+`, `P5.2` base | ✅ **Completed** |
+| **Sprint 10 (`v0.3.0`)** | Deterministic Scientific Claim Verification, Scale-Separation Audit & Stateful Peer-Review Clarification Engine | `P5.4` (`P0.1`–`P0.5`, `P1.5`, `P2.4`, `P3.1`, `P5.2` gate) | ✅ **Completed** |
+| **Sprint 8 (Slim — `v0.3.1`)** | External CFD/FEM Audit Adapters (OpenFOAM, FEniCSx, HDF5) & Headless LaTeX/PDF Referee Export *(PySide6 GUI `P5.1` archived)* | `P2.3+`, `P3.1+` | ✅ **Completed** |
+| **Sprint 9 (Slim — `v0.4.0`)** | PySR / External Symbolic-Regression Candidate Importer Gated by Sprint 10 *(in-repo LLM SDK wrappers dropped in favor of `rosolver-mcp`)* | `P5.2` (slim) | ✅ **Completed** |
+| **Archived (`P5.1` / `rosolver.ai`)** | PySide6 Desktop Qt App & In-Package Vendor LLM SDK Wrappers | `P5.1`, `P5.3` | 🗄️ **Archived / Superseded by MCP** |
 
 ---
 
@@ -114,8 +117,10 @@ flowchart LR
     S4 --> S6["Sprint 6: Reporting Engine & Workflow CLI (P3.1, P3.2)"]
     S5 --> S6
     S6 --> S7["Sprint 7: Heat-Transfer Demo, Modular Refactor, Docs & v0.2 Release (P3.3, P4.1-P4.4)"]
-    S7 -.-> S8["Sprint 8 (v0.3+): PySide6 Desktop App (P5.1)"]
-    S7 -.-> S9["Sprint 9 (v0.4+): AI & PySR Integration (P5.2, P5.3)"]
+    S7 --> MCP["v0.2.0 MCP Extension: 10-Tool Deterministic Server"]
+    MCP --> S10["Sprint 10 (v0.3.0): Claim Verification, Scale Audit & Peer-Review Engine (P5.4)"]
+    S10 --> S8["Sprint 8 Slim (v0.3.1): OpenFOAM/FEniCSx Audit Adapters & Headless PDF Export (P2.3+, P3.1+)"]
+    S8 --> S9["Sprint 9 Slim (v0.4.0): PySR Candidate Importer Gated by Sprint 10 (P5.2 Slim)"]
 ```
 
 ---
@@ -205,9 +210,14 @@ flowchart LR
   4. Bump version to `0.2.0`, configure optional dependency extras in `pyproject.toml`, and verify the `v0.2` release gate checklist (`P4.4`).
 - **Exit gate:** All `P4.4` success metrics met; clean PyPI wheel/sdist build; full CI pass.
 
-### **Post-`v0.2` Deferred Sprints (⏳ Deferred)**
-- **Sprint 8 (`v0.3+` — `P5.1`, `P2.3` extended adapters — ⏳ Deferred):** PySide6 thin-client desktop application (7 views over public API, non-blocking worker execution) + native FiPy / FEniCSx / OpenFOAM adapters + optional PDF report export.
-- **Sprint 9 (`v0.4+` — `P5.2`, `P5.3` — ⏳ Deferred):** Optional AI-assisted draft model formulation and PySR symbolic-regression candidate ingestion gated strictly by deterministic schema, dimensional, and V&V checks.
+### **Post-`v0.2` Rescoped Roadmap (`v0.3.0` → `v0.3.1` → `v0.4.0`)**
+- **Sprint 10 (`v0.3.0` Priority — `P5.4` — 🎯 Next Active):** Deterministic Scientific Claim Verification, Order-of-Magnitude Scale-Separation Audit, Error-Budget Dominance Analysis, and Stateful Multi-Round Peer-Review Clarification Engine (`R1` audit → structured reviewer queries → `R2` author rebuttal re-verification). Detailed in **Section 6** below.
+- **Sprint 8 Slim (`v0.3.1` — `P2.3+`, `P3.1+` — 📋 Rescoped):**
+  - **Retained & Promoted:** Native post-processing audit adapters for **OpenFOAM** (`postProcessing/` sample sets & residuals), **FEniCSx / VTK-CSV**, and **HDF5** (`rosolver[io]`) feeding directly into Sprint 10 external-paper audits, plus a **headless LaTeX/PDF report renderer** converting `"peer_review_letter"` and `ScientificReport` artifacts into publication-ready PDFs.
+  - **Cut / Archived (`P5.1`):** PySide6 desktop Qt application (~5k+ LOC UI maintenance, OS binary packaging, headless CI overhead) is archived indefinitely; `rosolver-mcp` + IDE agents + Jupyter + CLI supersede a standalone Qt desktop shell.
+- **Sprint 9 Slim (`v0.4.0` — `P5.2` slim — 📋 Rescoped):**
+  - **Retained:** Lightweight **PySR / External Symbolic-Regression Candidate Importer** (`CandidateImporter.from_pysr_csv` + optional `rosolver[pysr]`), filtering Pareto-front expressions strictly through `parse_expr` (`P0.5`) → `DimensionalEngine` → Sprint 10 `check_equation_scales` → WLS/identifiability (`P2.1`).
+  - **Dropped (`rosolver/ai/` SDK wrappers):** In-package vendor LLM clients and API-key wrappers are dropped permanently, as `rosolver-mcp` keeps LLM orchestration strictly outside the deterministic, offline, vendor-neutral core.
 
 ---
 
@@ -228,3 +238,210 @@ flowchart LR
 3. Add `.github/workflows/ci.yml` running `pytest -v`.
 4. Harden `rosolver/_parsing.py` with an AST whitelist parser + injection unit tests.
 5. Add a `rosolver.__all__` public API snapshot test, then begin Sprint 1 (`VerificationStatus` + `tests/benchmarks/`).
+
+
+---
+
+## **6. Sprint 10 — Deterministic Scientific Claim Verification, Scale-Separation Audit & Stateful Peer-Review Engine (`v0.3` Priority Track — `P5.4`)**
+
+### **6.1 Motivation & Empirical Failure-Mode Grounding**
+
+While `v0.2.0` and `rosolver-mcp` (`rosolver/mcp/`) already provide 10 deterministic tools for dimensional homogeneity, symbolic formulation, calibration, ODE/PDE/Stefan simulation, V&V, and SHA-256 project ledgers, auditing mathematically intensive manuscripts and empirical claims exposes **five critical scientific failure modes** that unit checking and single-run V&V alone do not catch. Each failure mode was demonstrated directly in the repository's three domain audit studies ([`examples/pond_freezing_audit_study/run_study.py`](../../examples/pond_freezing_audit_study/run_study.py) on [`docs/refs/new_icd_study.txt`](../refs/new_icd_study.txt), [`examples/ice_nucleation_growth_study/run_study.py`](../../examples/ice_nucleation_growth_study/run_study.py), and [`examples/cardiovascular_lifespan_study/run_study.py`](../../examples/cardiovascular_lifespan_study/run_study.py)):
+
+| # | Failure Mode | Concrete Repository Evidence | Gap in `v0.2.0` Core | Sprint 10 Deterministic Remedy |
+| --- | --- | --- | --- | --- |
+| **FM-1** | **Dimensionally Homogeneous $\neq$ Scale-Consistent** | In `new_icd_study.txt`, $\rho a + \nabla P = 0$ passes unit checking ($\mathrm{Pa/m}$), yet actual ice-front inertia $\rho\|\ddot{\delta}\| = 7.53\times 10^{-11}\text{ Pa/m}$ lags atmospheric $\|\partial_z p_v\| \approx 885\text{–}8{,}848\text{ Pa/m}$ by **$10^{13.07}\times$** (literal integration yields $2.5\times 10^6\text{ km}$ of ice). | `DimensionalEngine` checks rational unit exponents only, ignoring operating-envelope magnitudes. | `ScaleBalanceAudit` (`rosolver/claims/scales.py`): interval & derivative-scale magnitude evaluation flagging disjoint two-term balances (`unbalanced_dominant_terms` $\to$ `Failed`). |
+| **FM-2** | **Implicit Unit Normalizations & Differential Geometry Confusion** | Draft crystallization derivation wrote `1 - rho*V` ($1$ hiding $m_{\max}$ of unit $\mathrm{kg}$) and `sigma = A*dz` ($\mathsf{L}^3$ volume element conflated with $\mathsf{L}^2$ area). | `check_dimensions` rejects inhomogeneous sums without computing exact missing dimensional constants. | `NormalizationRepairDiagnostic`: solves $\dimbr{\kappa_{\mathrm{missing}}} = \dimbr{B}/\dimbr{A}$ on failed AST sum nodes and emits structured `MissingConstantHypothesis` items without auto-mutating equations. |
+| **FM-3** | **Claimed Validation Accuracy Masked by Discretization / Scheme Ambiguity** | `new_icd_study.txt` claims $0.35\%$ validation error using $n=12$ steps ($\Delta t = 6{,}000\text{ s}$) without naming the time integrator; Explicit Euler consumes **$0.194\%$ ($55.4\%$)** of the claimed error budget vs. $<10^{-7}\%$ for RK4. | `TimestepReport` and `ValidationStudy` run independently without testing $u_{\mathrm{num}} / \varepsilon_{\mathrm{claimed}}$ or undeclared-scheme spread. | `ErrorBudgetAudit` (`rosolver/claims/budget.py`): compares $u_{\mathrm{num}}$ and multi-scheme spread $\Delta_{\mathrm{scheme}}$ directly against $\varepsilon_{\mathrm{claimed}}$. |
+| **FM-4** | **Zero-Intercept Homogeneity Lock & Unexcited $\Pi$-Manifolds** | In `cardiovascular_lifespan_study`, forcing $\mathcal{L}_0 = 0$ locked elasticities via Euler's theorem ($E_{\mathcal{L},H} - E_{\mathcal{L},D} \equiv -1$, $R^2 = -14.71$), while 1D cohort tables left $\ln(\mathrm{St})$ collinear ($r = -0.9992$). | `IdentifiabilityReport` checks parameter Jacobians *after* fitting, not experimental design $\Pi$-space rank or homogeneity sum rules up front. | `DesignExcitationAudit`: evaluates $\operatorname{rank}(\log \boldsymbol{\Pi})$ and tests empirical elasticities against zero-intercept Euler sum rules before accepting structural rejections. |
+| **FM-5** | **Plausible Theory Conflated with Unmeasured Lab Claims (No Rebuttal Loop)** | Peat-pond freeze purification (`new_icd_study.txt`) is mechanistically plausible ($\mathrm{Pe}_s = 0.229 \Rightarrow 98.75\%$ BPS rejection) but empirically `Inconclusive` (no TOC/COD/ion CSVs); human peer reviewers resolve this via R1 $\to$ R2 author queries. | Single-pass `VerificationStatus` collapses theoretical plausibility and empirical evidence into one scalar, with no stateful clarification/rebuttal workflow. | Two-axis `ClaimVerdict` (`mechanistic_status` $\times$ `empirical_status`), deterministic `ClarificationRequest` generator, and SHA-256 multi-round `R1` $\to$ `R2` rebuttal engine. |
+
+---
+
+### **6.2 Core Architectural Principles & Epistemic Guardrails**
+
+1. **Zero LLM Runtime Dependency in `rosolver` Core:** All claim schemas, scale-balance algebra, error-budget ratios, reviewer-question templates, and rebuttal state transitions execute deterministically in pure Python (`numpy`, `scipy`, `sympy`, `pyyaml`). External AI agents interact strictly as untrusted clients over `rosolver-mcp` or the Python/CLI API.
+2. **Hard Anti-Override Invariant:** An agent or user may *propose* a `ClaimManifest` mapping manuscript statements to equations, parameter ranges, and datasets, **but `ClaimVerdict` statuses are computed exclusively by `rosolver` from cryptographically verified `ExecutionRecord` run IDs in `Project.ledger()`**. No API, CLI flag, or MCP payload permits passing a manual `"Passed"` status override.
+3. **Strict Two-Axis Separation (Theory $\neq$ Lab Proof):** Every claim tracks `mechanistic_status` (dimensional, scale-balance, conservation, analytical/ODE/PDE consistency) separately from `empirical_status` (experimental `Dataset` presence, replicate $u_{\mathrm{exp}}$, `ValidationStudy` parity). High theoretical plausibility (`mechanistic_status=Passed`) paired with missing lab assays (`empirical_status=NotAssessed` or `Inconclusive`) **must** synthesize to `Inconclusive` and trigger a targeted `ClarificationRequest`—never `Supported`.
+4. **AST & Workspace Confinement (`P0.5` Enforcement):** All manuscript equations, candidate repairs, and rebuttal expressions parse exclusively through `rosolver._parsing.parse_expr`; all YAML manifests load via `yaml.safe_load`; all rebuttal data files enforce relative-path confinement inside `project.root` with zero absolute user path leaks (`AGENTS.md` Rule 1).
+5. **Anti-P-Hacking / Post-Hoc Tuning Guardrail:** When an author rebuttal modifies model parameters or constitutive equations between Round $k$ and Round $k+1$ (rather than supplying previously missing numerical metadata or blind replicate measurements), the engine records a `post_hoc_recalibration` flag and requires either independent validation points (`df > k_params`) or downgrades empirical status to `Warning` (`calibrated_not_blindly_validated`).
+6. **Explicit Scope Framing:** Generated referee reports audit mathematical, dimensional, scale-separation, numerical, and statistical consistency against supplied evidence; they explicitly disclaim wet-lab specimen authentication or formal regulatory certification.
+
+---
+
+### **6.3 Target Package & Project Workspace Extensions**
+
+#### **6.3.1 New Subpackage (`rosolver/claims/`)**
+
+```text
+rosolver/
+├── claims/
+│   ├── __init__.py          # Public exports re-exported in rosolver/__init__.py
+│   ├── schema.py            # ClaimKind, ClaimSpec, ClaimManifest, TwoAxisAssessment, ClaimVerdict
+│   ├── scales.py            # OperatingEnvelope, ScaleBalanceReport, check_equation_scales, diagnose_normalization_shortcuts, check_homogeneity_elasticities
+│   ├── budget.py            # ErrorBudgetReport, audit_claimed_accuracy, audit_scheme_ambiguity
+│   ├── clarifications.py    # ArtifactRequirementSpec, ClarificationRequest, generate_clarification_requests
+│   ├── rebuttal.py          # RebuttalSubmission, ReviewRoundRecord, VerdictTransition, evaluate_rebuttal_round
+│   └── engine.py            # ClaimAuditEngine orchestrating deterministic checks over a Project
+```
+
+#### **6.3.2 `Project` Workspace Directory Additions (`rosolver/project.py`)**
+
+Extend `_PROJECT_DIRS` and `_RUN_SUBDIRS` (backwards-compatibly on `Project.open`) with:
+
+```text
+<project_root>/
+├── claims/
+│   ├── manifest.yaml                # Declarative ClaimManifest (SHA-256 tracked in project.yaml)
+│   ├── clarifications_open.json     # Active machine-actionable ClarificationRequest items
+│   └── rounds/
+│       ├── round_001.json           # Immutable R1 verdicts, linked run_ids & issued requests
+│       └── round_002.json           # Immutable R2 verdicts, rebuttal hashes & VerdictTransition diffs
+```
+
+#### **6.3.3 Multi-Round Peer-Review State Machine**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ingested: ClaimManifest registered (SHA-256)
+    Ingested --> RoundAudited: ClaimAuditEngine executes linked checks
+    RoundAudited --> Supported: Mechanistic Passed AND Empirical Passed
+    RoundAudited --> Falsified: Dimensional, Scale-Balance, Conservation, or Validation Failed
+    RoundAudited --> ClarificationPending: Inconclusive, Warning, or UnderSpecified
+    ClarificationPending --> RebuttalSubmitted: Author supplies CSV / scheme / closure (SHA-256 locked)
+    RebuttalSubmitted --> RoundAudited: Resolution gates auto-replay in Round k+1
+    Supported --> [*]
+    Falsified --> [*]
+```
+
+---
+
+### **6.4 Detailed Workstreams & Technical Specifications (`S10.1` – `S10.7`)**
+
+#### **`S10.1` Declarative `ClaimManifest` & Two-Axis Verdict Schema (`rosolver/claims/schema.py`)**
+- **Goal:** Represent mathematically intensive manuscript claims and their required evidence contracts as deterministic, serializable data structures.
+- **Deliverables:**
+  1. Implement `ClaimKind` enum:
+     - `"equation_law"` (governing algebraic/ODE/PDE balance law, e.g., $\rho a + \nabla P = 0$),
+     - `"dimensional_scaling"` (allometric, Buckingham-$\Pi$, or elasticity claim),
+     - `"numerical_accuracy"` (claimed solver convergence, step count $n$, or validation error $\varepsilon_{\mathrm{claimed}}$),
+     - `"conservation_invariant"` (claimed mass, energy, momentum, or probability conservation),
+     - `"parameter_calibration"` (reported fitted constants, $R^2$, RMSE, or model ranking),
+     - `"empirical_comparison"` (quantitative lab/field comparison with or without reported $u_{\mathrm{exp}}$),
+     - `"qualitative_observation"` (unquantified physical/visual equivalence claim, e.g., peat-pond vs. lake ice).
+  2. Implement `ClaimSpec(ResultMixin)`:
+     - Fields: `id: str`, `title: str`, `kind: ClaimKind`, `source_excerpt: str`, `equations: List[str]`, `variables_units: Dict[str, str]`, `operating_envelope: Optional[Dict[str, Tuple[float, float]]]`, `characteristic_scales: Dict[str, float]`, `discretization_spec: Dict[str, Any]` (`n_steps`, `dt`, `n_cells`, `scheme` optional), `claimed_metrics: Dict[str, float]` (`rel_error`, `rmse`, `r2`, `order`), `expected_dataset: Optional[str]`, `required_observables: List[str]`.
+     - Validation: AST-parse every expression in `equations`, verify units via `Dimension.from_unit` (unless testing raw draft equations under `audit_raw_units=True`), and compute deterministic `content_hash()`.
+  3. Implement `ClaimVerdictKind` enum (`Supported`, `Falsified`, `PartiallySupported`, `SchemeDependent`, `Inconclusive`, `NotAssessed`) and deterministic synthesis matrix `synthesize_verdict(mechanistic: VerificationStatus, empirical: VerificationStatus, *, requires_empirical: bool) -> ClaimVerdictKind`:
+     - Any `FAILED` on either axis $\implies$ `Falsified`.
+     - `mechanistic == PASSED` and (`not requires_empirical` or `empirical == PASSED`) $\implies$ `Supported`.
+     - `mechanistic == PASSED` and `requires_empirical` with `empirical in (NOT_ASSESSED, INCONCLUSIVE)` $\implies$ `Inconclusive` (preserving `"Mechanistically plausible; empirical evidence missing"` note).
+     - `WARNING` on discretization/identifiability with no `FAILED` $\implies$ `PartiallySupported` or `SchemeDependent`.
+  4. Implement `ClaimVerdict(ResultMixin)` requiring `evidence_run_ids: List[str]` validated against `Project.ledger()`.
+
+#### **`S10.2` Order-of-Magnitude Scale-Separation & Normalization Repair Engine (`rosolver/claims/scales.py`)**
+- **Goal:** Catch equations that are dimensionally homogeneous yet physically impossible across stated operating conditions (`FM-1`), diagnose implicit unit normalizations (`FM-2`), and test homogeneity elasticity locks (`FM-4`).
+- **Mathematical & Algorithmic Specification:**
+  1. **Additive Term Decomposition & Derivative Scaling (`check_equation_scales`):**
+     - Move `lhs - rhs` into canonical additive terms $T_1 + T_2 + \dots + T_m = 0$ over AST `Add` nodes.
+     - Replace differential operators using declared characteristic scales (`characteristic_scales={"t": t_c, "x": L_c, "z": delta_c}`):
+       $$\left|\frac{\partial^k u}{\partial t^k}\right| \sim \frac{\Delta u}{t_c^k}, \qquad \left|\frac{\partial^k u}{\partial x^k}\right| \sim \frac{\Delta u}{L_c^k}$$
+       or evaluate exact trajectory derivatives when a `Trajectory` / `PDESolution` / `StefanSolution` is supplied!
+     - Evaluate interval bounds $[|T_j|_{\min}, |T_j|_{\max}]$ across `OperatingEnvelope` corners + log-midpoint via vectorized sampling.
+     - Compute pairwise log-magnitude gap $\Delta_{jk} = \log_{10}(|T_j|_{\mathrm{typ}} / |T_k|_{\mathrm{typ}})$ and dominant-balance ratio:
+       $$\rho_{\mathrm{bal}} = \frac{\max_j |T_j|_{\mathrm{typ}}}{\max_{k \neq j_{\max}} |T_k|_{\mathrm{typ}}}.$$
+     - **Classification rules:**
+       - If $m = 2$ and intervals $[|T_1|_{\min}, |T_1|_{\max}]$ and $[|T_2|_{\min}, |T_2|_{\max}]$ are separated by $>\tau_{\mathrm{scale}}$ (default $\tau_{\mathrm{scale}} = 10^2$, i.e., $2$ orders of magnitude): `VerificationStatus.FAILED` with diagnostic code `"unbalanced_dominant_terms"` and exact $\log_{10}$ discrepancy (reproducing `13.07` on `new_icd_study.txt`!).
+       - If $m \ge 3$, top two terms balance within $\tau_{\mathrm{scale}}$, and a retained term has $|T_i| / |T_{\max}| < 10^{-6}$: `VerificationStatus.WARNING` (`"negligible_asymptotic_term"`).
+       - Otherwise: `VerificationStatus.PASSED`.
+  2. **Normalization & Differential Geometry Repair Diagnostics (`diagnose_normalization_shortcuts`):**
+     - Walk the expression AST bottom-up; on any dimensionally mismatched `Add(A, B)` where $A$ is dimensionless (`1`) and $\dimbr{B} \neq 1$, emit `MissingConstantHypothesis(location=str(A), required_dimension=str(dim_B), suggested_symbol="c_norm", explanation="Dimensionless literal added to dimensional term; likely normalized by an undeclared reference scale.")`.
+     - Detect differential symbols (`dx`, `dz`, `dt`) multiplying finite geometric areas/volumes (`sigma = A * dz`) and flag differential-order mismatch explicitly.
+  3. **Euler Homogeneity & $\Pi$-Excitation Audit (`check_homogeneity_elasticities`):**
+     - Given target dimension $\mathbf{d}_y$, input dimensions $D = [\mathbf{d}_{x_1}, \dots, \mathbf{d}_{x_m}]$, and claimed/empirical elasticities $\mathbf{E} = [E_{y,x_1}, \dots, E_{y,x_m}]^T$, verify Euler's dimensional sum rule $D\,\mathbf{E} = \mathbf{d}_y$ (validating whether a zero-intercept power/$\Pi$ model can possibly match $\mathbf{E}$, or whether a dimensional baseline offset $y_0 \neq 0$ is mathematically mandatory!).
+     - Given a `Dataset`, compute effective numerical rank of $\log \boldsymbol{\Pi}(X)$ via SVD singular-value decay to warn before NLLS calibration when experimental covariates lie on a 1D collinear slice.
+
+#### **`S10.3` Discretization vs. Claimed-Error Budget & Scheme-Ambiguity Auditor (`rosolver/claims/budget.py`)**
+- **Goal:** Prevent unresolved numerical discretization error or omitted solver metadata from masquerading as experimental validation accuracy (`FM-3`).
+- **Deliverables:**
+  1. Implement `audit_claimed_accuracy(model_or_solver, *, claimed_rel_error: float, discretization: Mapping[str, Any], candidate_schemes=("euler", "beuler", "cn", "rk4"), r_factor: float = 2.0) -> ErrorBudgetReport`:
+     - **Case A — Scheme declared** (e.g., `scheme="rk4"`, `dt=6000.0`): Execute 3-level refinement `(dt, dt/r, dt/r^2)` (or spatial `(N, rN, r^2 N)`), compute Roache/Celik `u_num_rel = gci_fine_21` (and coarse-level error at the paper's actual `dt`), and evaluate budget ratio $R_{\mathrm{disc}} = u_{\mathrm{num,paper}} / \varepsilon_{\mathrm{claimed}}$.
+       - $R_{\mathrm{disc}} \ge 1.0 \implies$ `VerificationStatus.FAILED` (`"discretization_exceeds_claimed_error"`).
+       - $0.25 \le R_{\mathrm{disc}} < 1.0 \implies$ `VerificationStatus.WARNING` (`"discretization_consumes_error_budget"`).
+       - $R_{\mathrm{disc}} < 0.25 \implies$ `VerificationStatus.PASSED`.
+     - **Case B — Scheme omitted in manuscript** (`scheme=None`, as in `new_icd_study.txt` Table 1 `n=12, dt=72000/12`): Evaluate across `candidate_schemes` against a high-order reference solve (`DOP853` / fine `cn`), computing worst-case scheme error $u_{\max}$, best-case scheme error $u_{\min}$, and scheme spread $\Delta_{\mathrm{scheme}} = \max_{s_1, s_2}|\phi_{s_1} - \phi_{s_2}| / |\phi_{\mathrm{ref}}|$.
+       - If $u_{\min} \ge \varepsilon_{\mathrm{claimed}}$: `VerificationStatus.FAILED` (no standard integrator can achieve the claimed error at step count $n$).
+       - If $u_{\min} < \varepsilon_{\mathrm{claimed}} \le u_{\max}$ or $u_{\max} / \varepsilon_{\mathrm{claimed}} \ge 0.25$: `VerificationStatus.WARNING` / `SchemeDependent` (`0.194% / 0.35% = 55.4%` for Euler vs. `<1e-7%` for RK4!) and trigger a mandatory scheme-clarification query.
+
+#### **`S10.4` Deterministic Peer-Review `ClarificationRequest` Generator (`rosolver/claims/clarifications.py`)**
+- **Goal:** Translate every `Failed`, `Inconclusive`, `Warning`, or `NotAssessed` audit finding into structured, quantitative, non-hallucinated referee requests—matching how human domain reviewers question empirical and methodological gaps (`FM-5`).
+- **Deliverables:**
+  1. Implement `ArtifactRequirementSpec(ResultMixin)`:
+     - `kind`: `"experimental_dataset"` | `"refinement_series"` | `"constitutive_equation"` | `"solver_metadata"` | `"uncertainty_specification"`
+     - `required_columns: List[str]`, `expected_units: Dict[str, str]`, `min_rows: int`, `min_replicates: int`, `uncertainty_columns_required: bool`, `description: str`.
+  2. Implement `ClarificationRequest(ResultMixin)`:
+     - `request_id: str` (deterministic `CR-R{round}-{seq:03d}`),
+     - `claim_id: str`,
+     - `severity: str` (`"major_falsification"`, `"major_missing_data"`, `"major_methodological"`, `"minor_clarification"`),
+     - `trigger_code: str` (e.g., `"unbalanced_dominant_terms"`, `"missing_empirical_dataset"`, `"scheme_unspecified_error_budget_confounded"`, `"missing_experimental_uncertainty"`, `"implicit_unit_normalization"`, `"collinear_pi_design"`),
+     - `quantitative_findings: Dict[str, Any]` (exact solver numbers anchoring the question),
+     - `reviewer_prompt: str` (concise, deterministic referee question citing exact numbers, units, and required resolution),
+     - `required_artifact: ArtifactRequirementSpec`,
+     - `resolution_gate: Dict[str, Any]` (serialized `ClaimAuditEngine` check specification to execute automatically when the author responds).
+  3. Build deterministic template rules covering all 6 canonical trigger families—ensuring identical inputs produce byte-identical `ClarificationRequest` payloads with zero LLM randomness.
+
+#### **`S10.5` Stateful Multi-Round Rebuttal & Re-Verification Engine (`rosolver/claims/rebuttal.py`, `rosolver/claims/engine.py`)**
+- **Goal:** Close the R1 $\to$ Author Rebuttal $\to$ R2 re-verification loop inside `rosolver.Project` with full SHA-256 provenance and anti-p-hacking safeguards.
+- **Deliverables:**
+  1. Implement `ClaimAuditEngine.run_round(project: Project, manifest: Optional[ClaimManifest] = None) -> ReviewRoundRecord`:
+     - Executes all deterministic checks linked to each `ClaimSpec` (`check_dimensions`, `check_equation_scales`, `audit_claimed_accuracy`, `ODESystem`/`ConservationLaw1D`/`Stefan1D` solves, `audit_ode_invariants`/`audit_pde_conservation`, `ValidationStudy`), records every underlying run in `execution_ledger.jsonl`, synthesizes `ClaimVerdict` items, writes `claims/rounds/round_{k:03d}.json`, and updates `claims/clarifications_open.json`.
+  2. Implement `ClaimAuditEngine.submit_rebuttal(project: Project, submissions: Sequence[RebuttalSubmission]) -> ReviewRoundRecord`:
+     - Validates each `RebuttalSubmission` against its target `ClarificationRequest.required_artifact` (verifying required columns, units, row/replicate counts, and uncertainty columns before running!).
+     - Registers uploaded datasets via `project.add_dataset(...)` and updated models via `project.add_model(...)` (locking SHA-256 digests).
+     - Detects whether model structure or fitted parameters changed relative to Round $k$; if modified without new out-of-sample validation rows, flags `post_hoc_recalibration=True`.
+     - Automatically executes Round $k+1$, computing `VerdictTransition(claim_id, prev_verdict, new_verdict, resolved_request_ids, remaining_request_ids, delta_metrics)`.
+
+#### **`S10.6` Workflow CLI, Referee Reporting Scopes & `rosolver-mcp` Expansion**
+- **Goal:** Expose the entire claim-verification and peer-review lifecycle identically across Python API, CLI (`P3.2`), `ScientificReport` (`P3.1`), and `rosolver-mcp`.
+- **Deliverables:**
+  1. **Reporting Scopes (`rosolver/reporting/markdown.py`):**
+     - Extend `REPORT_TYPES` from `8` to `10` canonical scopes by adding `"claim_verification"` and `"peer_review_letter"`.
+     - `"peer_review_letter"` renders a structured scientific referee report: Executive Audit Scorecard table, Major Falsifications & Counterexamples, Major Empirical/Methodological Clarification Requests (with exact CSV/metadata schemas requested from authors), Minor Comments, and (for Round $\ge 2$) an **R1 $\to$ R2 Rebuttal Resolution & Verdict Diff Table**.
+  2. **CLI Subcommands (`rosolver/cli.py`):**
+     - `rosolver claim init <project> --manifest <claims.yaml> [--json]`
+     - `rosolver claim audit <project> [--output reports/referee_r1.md] [--json]`
+     - `rosolver claim questions <project> [--severity major|all] [--json]`
+     - `rosolver claim respond <project> --rebuttal <rebuttal.yaml> [--output reports/referee_r2.md] [--json]`
+     - Exit codes follow existing CLI contract: `0` all claims `Supported` (or `PartiallySupported` without `Falsified`/`Inconclusive`), `1` any claim `Falsified` or `Inconclusive`, `2` schema/hash/integrity error.
+  3. **MCP Server Tools, Resource & Prompt (`rosolver/mcp/tools.py`):**
+     - `rosolver_check_scales`: Stateless or project-bound term-by-term scale-balance, derivative-scaling, normalization-shortcut, and Euler elasticity sum-rule auditor.
+     - `rosolver_audit_claims`: Initialize/execute a full deterministic `ClaimManifest` audit round on a `Project`, returning `ClaimVerdict` list + `ClarificationRequest` items + referee report Markdown.
+     - `rosolver_submit_rebuttal`: Ingest author clarifications/datasets against open `request_id` items, run Round $k+1$ re-verification, and return `VerdictTransition` diffs.
+     - New MCP resource: `rosolver://schema/claims` (reference `ClaimManifest` & `RebuttalSubmission` YAML schema).
+     - New MCP prompt: `peer_review_manuscript` (guides an AI reviewer agent to extract untrusted manuscript claims into `ClaimManifest`, invoke `rosolver_check_scales` + `rosolver_audit_claims`, present `Falsified`/`Inconclusive` verdicts verbatim without override, and issue structured author clarification queries).
+
+#### **`S10.7` Phased Execution Order, Benchmark Suite & Sprint 10 Exit Gate**
+
+##### **Internal Sub-Phase Execution Order**
+1. **Phase 10A (`schema.py` + `scales.py`):** Implement `ClaimManifest`, `TwoAxisAssessment`, `check_equation_scales`, `diagnose_normalization_shortcuts`, and `check_homogeneity_elasticities` + unit tests.
+2. **Phase 10B (`budget.py` + `clarifications.py`):** Implement `audit_claimed_accuracy` (declared & undeclared scheme spread) and deterministic `ClarificationRequest` rule templates + unit tests.
+3. **Phase 10C (`rebuttal.py` + `engine.py` + `project.py` + `reporting/markdown.py`):** Wire `claims/` into `Project`, implement `ClaimAuditEngine` R1 $\to$ R2 transitions, anti-p-hacking flags, and `"claim_verification"` / `"peer_review_letter"` reports.
+4. **Phase 10D (`cli.py` + `mcp/tools.py` + End-to-End Benchmarks & Docs):** Add `rosolver claim ...` CLI commands, 3 MCP tools + resource/prompt, `docs/user_guide/claim_verification.md` (following the 8-item `P4.3` documentation standard), and full end-to-end benchmark tests.
+
+##### **Mandatory Automated Benchmark & Security Test Matrix**
+1. **Benchmark S10-B1 (`new_icd_study.txt` Full R1 $\to$ R2 Lifecycle):**
+   - **R1 Audit:** Automatically classifies Claim 1 (`Supported`, evaporative share $62.9\%$), Claim 2 (`Falsified`, $\Delta\log_{10} = 13.07$ on $\rho a + \nabla P = 0$), Claim 3 (`SchemeDependent` / `Warning`, Euler $0.194\%$ vs. $0.35\%$ budget), and Claim 5 (`Inconclusive`, `mechanistic=Passed` via $\mathrm{Pe}_s=0.229$ but `empirical=NotAssessed`), emitting 3 deterministic `ClarificationRequest` items (`CR-R1-001`..`CR-R1-003`).
+   - **R2A Positive Rebuttal:** Submitting `scheme="rk4"` + multi-step `(12, 24, 48)` CSV + replicate TOC/conductivity CSV showing $97\%$ rejection $\pm u_{\mathrm{exp}}$ transitions Claim 3 $\to$ `Supported` and Claim 5 $\to$ `Supported` with SHA-256 audit trail.
+   - **R2B Negative Rebuttal:** Submitting replicate TOC CSV showing high solute entrapment ($k_{\mathrm{eff}} = 0.65$) transitions Claim 5 from `Inconclusive` $\to$ `Falsified` automatically.
+2. **Benchmark S10-B2 (Normalization & Differential Audit):** Feeds raw `N * d(rho*V)/dt = beta * (1 - rho*V)` and `sigma = A * dz` into `diagnose_normalization_shortcuts`, asserting exact recovery of missing mass scale $\dimbr{m_{\max}} = \mathsf{M}$ and area/volume differential mismatch.
+3. **Benchmark S10-B3 (Homogeneity Elasticity Lock & Collinearity):** Feeds intra-species human lifespan elasticities ($E_{\mathcal{L},H} \approx -0.15, E_{\mathcal{L},D} \approx +0.08$) into `check_homogeneity_elasticities`, asserting deterministic rejection of zero-intercept $\mathcal{L}_0 = 0$ scaling and detection of 1D $\log(\mathrm{St})$ collinearity.
+4. **Security & Epistemic Integrity Suite:**
+   - Rejects malicious AST payloads (`__import__('os')`, attribute access, lambdas) inside `ClaimManifest` equations and rebuttal expressions.
+   - Rejects `../` path traversal on rebuttal dataset paths.
+   - Rejects direct construction or deserialization of `ClaimVerdict(overall_verdict="Supported")` lacking matching `Passed` `ExecutionRecord` IDs in `Project.ledger()`.
+   - Verifies zero hardcoded absolute user-home paths or local file-URI prefixes across all generated JSON, YAML, and Markdown referee reports (`AGENTS.md` Rule 1).
+
+##### **Sprint 10 Definition of Done (Exit Gate)**
+- All existing `v0.2.0` tests (`161+`) and `rosolver.__all__` exports remain 100% green without modification to legacy solver signatures.
+- Zero new runtime dependencies added (`numpy`, `scipy`, `sympy`, `matplotlib`, `pyyaml` only).
+- All 4 Sprint 10 benchmarks (`S10-B1`..`S10-B3` + Security/Anti-Override suite), CLI `rosolver claim` tests, and MCP tool tests (`13` total MCP tools) pass headlessly with exit code `0`.

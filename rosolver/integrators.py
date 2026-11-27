@@ -143,8 +143,13 @@ def max_stable_dt(scheme: str, eigenvalues: Sequence[complex], growth_tol: float
         mag = abs(lam)
         if mag < 1e-300 or lam.real > growth_tol * mag:
             continue
-        dts = np.logspace(-5, 3, 600) / mag
-        stable = np.abs(stability_function(c, dts * lam)) <= 1.0 + 1e-12
+        # Order-1 and Order-2 explicit RK schemes have |R(iy)| > 1 for all y != 0 on the imaginary axis
+        if abs(lam.real) <= 1e-12 * mag and c in ("euler", "ssprk2"):
+            limits.append(0.0)
+            continue
+        dts = np.logspace(-6, 4, 800) / mag
+        tol_stab = 1e-14 if abs(lam.real) <= 1e-12 * mag else 1e-12
+        stable = np.abs(stability_function(c, dts * lam)) <= 1.0 + tol_stab
         if not stable[0]:
             limits.append(0.0)
             continue
@@ -154,7 +159,7 @@ def max_stable_dt(scheme: str, eigenvalues: Sequence[complex], growth_tol: float
         lo, hi = dts[bad[0] - 1], dts[bad[0]]
         for _ in range(80):
             mid = 0.5 * (lo + hi)
-            if abs(stability_function(c, mid * lam)) <= 1.0 + 1e-12:
+            if abs(stability_function(c, mid * lam)) <= 1.0 + tol_stab:
                 lo = mid
             else:
                 hi = mid
@@ -184,6 +189,7 @@ class FixedStepResult:
     scheme: str
     nfev: int
     newton_failures: int = 0
+    diverged: bool = False
 
 
 def integrate_fixed(
@@ -230,6 +236,7 @@ def integrate_fixed(
         ys.append(y.copy())
     nfev = 0
     failures = 0
+    diverged = False
 
     if name in EXPLICIT_TABLEAUS:
         tab = EXPLICIT_TABLEAUS[name]
@@ -237,11 +244,14 @@ def integrate_fixed(
         K = np.empty((s, y.size))
         for n in range(n_steps):
             t = t0 + n * h
-            for i in range(s):
-                yi = y if i == 0 else y + h * (tab.A[i, :i] @ K[:i])
-                K[i] = f(t + tab.c[i] * h, yi)
-            y = y + h * (tab.b @ K)
+            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                for i in range(s):
+                    yi = y if i == 0 else y + h * (tab.A[i, :i] @ K[:i])
+                    K[i] = f(t + tab.c[i] * h, yi)
+                y = y + h * (tab.b @ K)
             nfev += s
+            if not np.all(np.isfinite(y)):
+                diverged = True
             if save[n + 1]:
                 ts.append(t0 + (n + 1) * h)
                 ys.append(y.copy())
@@ -251,29 +261,68 @@ def integrate_fixed(
         for n in range(n_steps):
             t = t0 + n * h
             tn1 = t + h
+            if not np.all(np.isfinite(y)):
+                diverged = True
+                failures += 1
+                if save[n + 1]:
+                    ts.append(tn1)
+                    ys.append(y.copy())
+                continue
             base = y.copy()
-            if theta < 1.0:
-                base = base + (1.0 - theta) * h * np.asarray(f(t, y), dtype=float)
-                nfev += 1
-            Y = y.copy()
-            J = jac(tn1, Y) if jac is not None else fd_jacobian(f, tn1, Y)
-            nfev += 0 if jac is not None else y.size + 1
-            lu = lu_factor(eye - theta * h * np.asarray(J, dtype=float))
+            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                if theta < 1.0:
+                    base = base + (1.0 - theta) * h * np.asarray(f(t, y), dtype=float)
+                    nfev += 1
+                Y = y.copy()
+                J = jac(tn1, Y) if jac is not None else fd_jacobian(f, tn1, Y)
+                nfev += 0 if jac is not None else y.size + 1
+            if not np.all(np.isfinite(J)) or not np.all(np.isfinite(base)):
+                diverged = True
+                failures += 1
+                y = np.full_like(y, np.nan)
+                if save[n + 1]:
+                    ts.append(tn1)
+                    ys.append(y.copy())
+                continue
+            try:
+                lu = lu_factor(eye - theta * h * np.asarray(J, dtype=float))
+            except Exception:
+                diverged = True
+                failures += 1
+                if save[n + 1]:
+                    ts.append(tn1)
+                    ys.append(y.copy())
+                continue
+            step_converged = False
             for _ in range(newton_maxiter):
-                G = Y - base - theta * h * np.asarray(f(tn1, Y), dtype=float)
+                with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                    G = Y - base - theta * h * np.asarray(f(tn1, Y), dtype=float)
                 nfev += 1
-                dY = lu_solve(lu, -G)
-                Y = Y + dY
-                if np.linalg.norm(dY, np.inf) <= newton_tol * (1.0 + np.linalg.norm(Y, np.inf)):
+                if not np.all(np.isfinite(G)):
+                    diverged = True
                     break
-            else:
+                dY = lu_solve(lu, -G)
+                if not np.all(np.isfinite(dY)):
+                    diverged = True
+                    break
+                Y = Y + dY
+                scale_y = 1.0 + float(np.linalg.norm(Y, np.inf))
+                if (
+                    float(np.linalg.norm(dY, np.inf)) <= newton_tol * scale_y
+                    and float(np.linalg.norm(G, np.inf)) <= max(100.0 * newton_tol, 1e-8) * scale_y
+                ):
+                    step_converged = True
+                    break
+            if not step_converged:
                 failures += 1
             y = Y
+            if not np.all(np.isfinite(y)):
+                diverged = True
             if save[n + 1]:
                 ts.append(tn1)
                 ys.append(y.copy())
 
     return FixedStepResult(
         t=np.array(ts), y=np.array(ys), dt=h, n_steps=n_steps, scheme=name, nfev=nfev,
-        newton_failures=failures,
+        newton_failures=failures, diverged=diverged,
     )

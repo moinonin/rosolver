@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import sympy as sp
@@ -309,9 +309,135 @@ class VerificationStudy:
         coordinate: Optional[str] = None,
         field: Optional[str] = None,
         reference: Optional[str] = None,
+        spacing_col: Optional[str] = None,
+        qoi_col: Optional[str] = None,
     ) -> "VerificationStudy":
         ds = adapter.load_results(source)
-        return cls(ds, coordinate=coordinate, field=field, reference=reference)
+        return cls(
+            ds,
+            coordinate=coordinate,
+            field=field,
+            reference=reference,
+            spacing_col=spacing_col,
+            qoi_col=qoi_col,
+        )
+
+    @classmethod
+    def from_openfoam(
+        cls,
+        source: Union[str, Path],
+        *,
+        function_object: Optional[str] = None,
+        time: Optional[Union[str, float]] = None,
+        sample_file: Optional[str] = None,
+        coordinate: Optional[str] = None,
+        field: Optional[str] = None,
+        reference: Optional[str] = None,
+        units: Optional[Mapping[str, str]] = None,
+    ) -> "VerificationStudy":
+        """Load OpenFOAM ``postProcessing/`` sample sets or residuals into a ``VerificationStudy``."""
+        from .openfoam import OpenFOAMAdapter
+
+        adapter = OpenFOAMAdapter(
+            function_object=function_object,
+            time=time,
+            sample_file=sample_file,
+            coordinates=coordinate,
+            units=units,
+        )
+        return cls.from_adapter(adapter, source, coordinate=coordinate, field=field, reference=reference)
+
+    @classmethod
+    def from_fenicsx(
+        cls,
+        source: Union[str, Path],
+        *,
+        coordinate: Optional[str] = None,
+        field: Optional[str] = None,
+        reference: Optional[str] = None,
+        units: Optional[Mapping[str, str]] = None,
+        element_family: Optional[str] = None,
+        element_degree: Optional[int] = None,
+    ) -> "VerificationStudy":
+        """Load FEniCSx / VTK-CSV / ASCII VTK / VTU / XDMF exports into a ``VerificationStudy``."""
+        from .fenicsx import FEniCSxAdapter
+
+        adapter = FEniCSxAdapter(
+            units=units,
+            element_family=element_family,
+            element_degree=element_degree,
+        )
+        return cls.from_adapter(adapter, source, coordinate=coordinate, field=field, reference=reference)
+
+    @classmethod
+    def from_hdf5(
+        cls,
+        source: Union[str, Path],
+        *,
+        group: str = "/",
+        coordinate: Optional[str] = None,
+        field: Optional[str] = None,
+        reference: Optional[str] = None,
+        spacing_col: Optional[str] = None,
+        qoi_col: Optional[str] = None,
+        units: Optional[Mapping[str, str]] = None,
+    ) -> "VerificationStudy":
+        """Load HDF5 simulation results into a ``VerificationStudy`` (requires ``rosolver[io]``)."""
+        from .hdf5 import HDF5Adapter
+
+        adapter = HDF5Adapter(group=group, coordinates=coordinate, units=units)
+        return cls.from_adapter(
+            adapter,
+            source,
+            coordinate=coordinate,
+            field=field,
+            reference=reference,
+            spacing_col=spacing_col,
+            qoi_col=qoi_col,
+        )
+
+    @classmethod
+    def from_multi_grid(
+        cls,
+        adapter: SolverAdapter,
+        sources: Sequence[Any],
+        *,
+        spacings: Optional[Sequence[float]] = None,
+        field: str,
+        reducer: Callable[[np.ndarray], float] = lambda arr: float(np.mean(arr)),
+        name: str = "multi_grid_study",
+    ) -> "VerificationStudy":
+        """Aggregate a sequence of external solver meshes into a GCI-ready ``VerificationStudy``.
+
+        Each entry in ``sources`` is loaded via ``adapter.load_results(src)``; the scalar QoI
+        is computed via ``reducer(ds.column(field))`` and paired with ``spacings`` (or inferred
+        from ``mesh_metadata['h_eff']`` / ``mesh_metadata['h_sample']``).
+        """
+        if len(sources) < 2:
+            raise ValueError("from_multi_grid requires at least 2 grid sources.")
+        hs: List[float] = []
+        qois: List[float] = []
+        for idx, src in enumerate(sources):
+            ds = adapter.load_results(src)
+            qois.append(float(reducer(ds.column(field))))
+            if spacings is not None:
+                hs.append(float(spacings[idx]))
+            else:
+                h_val = ds.mesh_metadata.get("h_eff") or ds.mesh_metadata.get("h_sample") or ds.mesh_metadata.get("h")
+                if h_val is None:
+                    raise ValueError(
+                        f"Grid source #{idx} has no inferred spacing in mesh_metadata; pass explicit spacings=..."
+                    )
+                hs.append(float(h_val))
+
+        agg_ds = Dataset(
+            name=name,
+            coordinates={"h": np.asarray(hs, dtype=float)},
+            fields={field: np.asarray(qois, dtype=float)},
+            mesh_metadata={"n_grids": len(sources), "spacings": hs},
+            solver_metadata={"adapter": adapter.__class__.__name__},
+        )
+        return cls(agg_ds, coordinate="h", field=field, spacing_col="h", qoi_col=field)
 
     def grid_convergence(
         self,

@@ -20,7 +20,14 @@ import sympy as sp
 import rosolver
 from .._parsing import parse_expr, real_symbol
 from ..data import Dataset
-from ..dimensions import DERIVED_UNIT_TO_DIM, SI_UNIT_TO_DIM, UNIT_TO_DIM, Dimension, DimensionalEngine
+from ..dimensions import (
+    DERIVED_UNIT_TO_DIM,
+    SI_UNIT_TO_DIM,
+    UNIT_TO_DIM,
+    Dimension,
+    DimensionalEngine,
+    _SI_PREFIX_SCALE,
+)
 from ..integrations import VerificationStudy
 from ..integrators import EXPLICIT_TABLEAUS
 from ..model import Model, ModelValidationError
@@ -253,17 +260,28 @@ def _build_pde_bc(bc_raw: Any) -> Any:
 
 
 def tool_capabilities(args: Mapping[str, Any]) -> Dict[str, Any]:
+    from ..claims.schema import ClaimKind, ClaimVerdictKind
+
     return {
         "name": "rosolver-mcp",
         "rosolver_version": rosolver.__version__,
+        "tools": [spec["name"] for spec in TOOL_SPECIFICATIONS],
+        "resources": [res["uri"] for res in list_mcp_resources()],
+        "prompts": [pr["name"] for pr in list_mcp_prompts()],
         "templates": [getattr(t, "name", str(t)) for t in list_templates()],
         "integrator_schemes": sorted(
             set(EXPLICIT_TABLEAUS.keys()) | {"beuler", "cn", "RK45", "RK23", "DOP853", "Radau", "BDF", "LSODA"}
         ),
         "pde_reconstructions": ["constant", "linear", "minmod", "vanleer", "mc", "superbee"],
+        "external_adapters": ["generic_csv", "scipy", "openfoam", "fenicsx", "hdf5"],
+        "symbolic_importers": ["pysr_csv", "expressions"],
         "report_types": list(REPORT_TYPES),
+        "report_formats": ["markdown", "json", "yaml", "latex", "pdf"],
         "verification_statuses": [s.value for s in VerificationStatus],
+        "claim_kinds": [k.value for k in ClaimKind],
+        "claim_verdicts": [v.value for v in ClaimVerdictKind],
         "base_dimensions": ["M", "L", "T", "I", "Theta", "N", "J", "rad"],
+        "si_prefixes": sorted(_SI_PREFIX_SCALE.keys()),
         "supported_si_units": sorted(set(UNIT_TO_DIM) | set(DERIVED_UNIT_TO_DIM) | set(SI_UNIT_TO_DIM)),
     }
 
@@ -1184,7 +1202,24 @@ def tool_report(args: Mapping[str, Any]) -> Dict[str, Any]:
     if not args.get("project_dir"):
         raise MCPToolError("'project_dir' is required for rosolver_report.")
     proj = Project.open(str(args["project_dir"]))
-    out_rel = str(args.get("output", "reports/final_report.md"))
+    fmt = str(args.get("format", "")).strip().lower()
+    ext_map = {
+        "markdown": ".md",
+        "md": ".md",
+        "json": ".json",
+        "yaml": ".yaml",
+        "yml": ".yaml",
+        "latex": ".tex",
+        "tex": ".tex",
+        "pdf": ".pdf",
+    }
+    if args.get("output"):
+        out_rel = str(args["output"])
+    elif fmt in ext_map:
+        out_rel = f"reports/final_report{ext_map[fmt]}"
+    else:
+        out_rel = "reports/final_report.md"
+
     rep = proj.report(
         output=out_rel,
         title=args.get("title"),
@@ -1194,7 +1229,8 @@ def tool_report(args: Mapping[str, Any]) -> Dict[str, Any]:
         description=str(args.get("description", "")),
         also_manifest=bool(args.get("also_manifest", True)),
     )
-    return {
+    out_suf = Path(out_rel).suffix.lower()
+    payload: Dict[str, Any] = {
         "title": rep.title,
         "report_type": rep.report_type,
         "status": rep.status.value,
@@ -1203,6 +1239,350 @@ def tool_report(args: Mapping[str, Any]) -> Dict[str, Any]:
         "n_runs": len(rep.runs),
         "markdown": rep.to_markdown(),
     }
+    if out_suf in (".tex", ".latex", ".pdf") or fmt in ("tex", "latex", "pdf"):
+        payload["latex"] = rep.to_latex()
+    if out_suf == ".pdf" or fmt == "pdf":
+        out_p = Path(out_rel)
+        full_p = out_p if out_p.is_absolute() else (proj.root / out_p)
+        payload["pdf_compiled"] = bool(full_p.exists())
+    return payload
+
+
+def tool_check_scales(args: Mapping[str, Any]) -> Dict[str, Any]:
+    """Deterministic scale-balance, normalization-shortcut, and Euler elasticity sum-rule audit."""
+    from ..claims import (
+        check_equation_scales,
+        check_homogeneity_elasticities,
+        diagnose_normalization_shortcuts,
+    )
+
+    mode = str(args.get("mode", "scales")).strip().lower()
+    if mode == "normalization":
+        rep = diagnose_normalization_shortcuts(str(args["equation"]), args.get("dims") or {})
+        return rep.to_dict()
+    if mode == "elasticities":
+        rep_h = check_homogeneity_elasticities(
+            args["target_dim"],
+            args.get("input_dims") or {},
+            args.get("elasticities") or {},
+            tol=float(args.get("tol", 0.05)),
+            data=args.get("data"),
+        )
+        return rep_h.to_dict()
+
+    rep_s = check_equation_scales(
+        str(args["equation"]),
+        args.get("dims") or {},
+        args.get("operating_envelope") or {},
+        characteristic_scales=args.get("characteristic_scales"),
+        scale_threshold=float(args.get("scale_threshold", 100.0)),
+        negligible_ratio=float(args.get("negligible_ratio", 1e-6)),
+    )
+    return rep_s.to_dict()
+
+
+def tool_audit_claims(args: Mapping[str, Any]) -> Dict[str, Any]:
+    """Execute a deterministic ClaimManifest audit round on a Project workspace."""
+    from ..claims import ClaimManifest
+    from ..reporting import ReportGenerator
+
+    proj = Project.open(args["project_dir"])
+    manifest: Optional[ClaimManifest] = None
+    if args.get("manifest_path"):
+        manifest = ClaimManifest.from_file(args["manifest_path"])
+    elif args.get("manifest_dict"):
+        manifest = ClaimManifest.from_dict(args["manifest_dict"])
+    elif args.get("manifest_yaml"):
+        import yaml
+
+        loaded = yaml.safe_load(str(args["manifest_yaml"]))
+        manifest = ClaimManifest.from_dict(loaded)
+
+    rec = proj.audit_claims(manifest=manifest)
+    out: Dict[str, Any] = rec.to_dict()
+    if args.get("generate_report", True):
+        rep = ReportGenerator.from_claim_round(proj, rec, report_type="peer_review_letter")
+        out["referee_report_markdown"] = rep.to_markdown()
+        if args.get("output"):
+            out_p = Path(str(args["output"]))
+            full_out = out_p if out_p.is_absolute() else (proj.root / out_p)
+            rep.save(full_out, also_manifest=True)
+            out["report_output"] = full_out.relative_to(proj.root).as_posix() if full_out.is_relative_to(proj.root) else full_out.name
+    return out
+
+
+def tool_submit_rebuttal(args: Mapping[str, Any]) -> Dict[str, Any]:
+    """Submit author rebuttals against open ClarificationRequests and run Round k+1."""
+    from ..claims import RebuttalSubmission
+    from ..reporting import ReportGenerator
+
+    proj = Project.open(args["project_dir"])
+    if args.get("rebuttal_path"):
+        subs = RebuttalSubmission.load_list(args["rebuttal_path"])
+    else:
+        raw_subs = args.get("submissions") or []
+        subs = [RebuttalSubmission.from_dict(item) for item in raw_subs]
+
+    rec = proj.submit_rebuttal(subs)
+    out: Dict[str, Any] = rec.to_dict()
+    if args.get("generate_report", True):
+        rep = ReportGenerator.from_claim_round(proj, rec, report_type="peer_review_letter")
+        out["referee_report_markdown"] = rep.to_markdown()
+    return out
+
+
+def _make_external_adapter(adapter_name: str, args: Mapping[str, Any]) -> Any:
+    """Instantiate an external solver adapter from MCP tool arguments."""
+    from ..integrations import (
+        FEniCSxAdapter,
+        GenericCSVAdapter,
+        HDF5Adapter,
+        OpenFOAMAdapter,
+    )
+
+    kind = adapter_name.strip().lower()
+    units = args.get("units") if isinstance(args.get("units"), Mapping) else None
+    if kind == "openfoam":
+        return OpenFOAMAdapter(
+            function_object=args.get("function_object"),
+            time=args.get("time"),
+            sample_file=args.get("sample_file"),
+            coordinates=args.get("coordinate"),
+            units=units,
+            residual_tol=float(args.get("residual_tol", 1e-4)),
+        )
+    if kind == "fenicsx":
+        deg = int(args["element_degree"]) if args.get("element_degree") is not None else None
+        return FEniCSxAdapter(
+            units=units,
+            solver_name=str(args.get("solver_name", "FEniCSx")),
+            element_family=args.get("element_family"),
+            element_degree=deg,
+        )
+    if kind == "hdf5":
+        return HDF5Adapter(
+            group=str(args.get("group", "/")),
+            coordinates=args.get("coordinate"),
+            fields=args.get("fields"),
+            units=units,
+            missing_policy=str(args.get("missing_policy", "raise")),
+        )
+    if kind in ("csv", "generic_csv"):
+        return GenericCSVAdapter(
+            coordinates=args.get("coordinate"),
+            fields=args.get("fields"),
+            units=units,
+            missing_policy=str(args.get("missing_policy", "raise")),
+        )
+    raise MCPToolError(
+        f"Unsupported external adapter '{adapter_name}'. Choose from: openfoam, fenicsx, hdf5, csv."
+    )
+
+
+def _select_reducer(name: str) -> Callable[[np.ndarray], float]:
+    key = name.strip().lower()
+    if key == "mean":
+        return lambda arr: float(np.mean(arr))
+    if key == "max":
+        return lambda arr: float(np.max(arr))
+    if key == "min":
+        return lambda arr: float(np.min(arr))
+    if key == "l2":
+        return lambda arr: float(np.sqrt(np.mean(np.asarray(arr, dtype=float) ** 2)))
+    if key == "first":
+        return lambda arr: float(arr[0])
+    if key == "last":
+        return lambda arr: float(arr[-1])
+    raise MCPToolError(f"Unknown reducer '{name}'. Choose from: mean, max, min, l2, first, last.")
+
+
+def tool_import_external(args: Mapping[str, Any]) -> Dict[str, Any]:
+    """Ingest external CFD/FEM/HDF5 results (OpenFOAM, FEniCSx, HDF5, CSV) for inspection, multi-grid GCI, or reference error."""
+    adapter_name = str(args.get("adapter", "openfoam")).strip().lower()
+    action = str(args.get("action", "inspect")).strip().lower()
+    adapter = _make_external_adapter(adapter_name, args)
+    proj = Project.open(str(args["project_dir"])) if args.get("project_dir") else None
+
+    sources = args.get("sources")
+    source = args.get("source")
+    if action == "gci" and isinstance(sources, Sequence) and not isinstance(sources, (str, bytes)):
+        field_name = args.get("field")
+        if not field_name:
+            raise MCPToolError("Multi-grid GCI ('sources') requires 'field'.")
+        reducer = _select_reducer(str(args.get("reducer", "mean")))
+        spacings = [float(h) for h in args["spacings"]] if args.get("spacings") is not None else None
+        study = VerificationStudy.from_multi_grid(
+            adapter,
+            [str(s) for s in sources],
+            spacings=spacings,
+            field=str(field_name),
+            reducer=reducer,
+            name=str(args.get("study_name", f"{adapter_name}_multi_grid")),
+        )
+        gci_res = study.grid_convergence(
+            formal_order=float(args.get("formal_order", 2.0)),
+            safety_factor=float(args.get("safety_factor", 1.25)),
+            gci_tol=float(args.get("gci_tol", 0.05)),
+            order_tol=float(args.get("order_tol", 0.5)),
+        )
+        if proj is not None and bool(args.get("record_run", True)):
+            proj.record_run("gci", gci_res, configuration={"adapter": adapter_name, "field": str(field_name)})
+        return to_jsonable(gci_res.to_dict())
+
+    if not source:
+        raise MCPToolError("Provide 'source' path/directory (or 'sources' list with action='gci').")
+
+    ds = adapter.load_results(str(source))
+    if args.get("export_path"):
+        exp_p = Path(str(args["export_path"]))
+        if exp_p.suffix.lower() in (".h5", ".hdf5"):
+            ds.to_hdf5(exp_p)
+        else:
+            adapter.export_standard_format(exp_p)
+
+    if action == "inspect":
+        payload: Dict[str, Any] = {
+            "adapter": adapter_name,
+            "dataset_name": ds.name,
+            "n_rows": ds.n_rows,
+            "coordinates": {k: _downsample_1d(v) for k, v in ds.coordinates.items()},
+            "fields": {k: _downsample_1d(v) for k, v in ds.fields.items()},
+            "units": dict(ds.units),
+            "mesh_metadata": adapter.extract_mesh_metadata(),
+            "solver_metadata": adapter.extract_solver_metadata(),
+        }
+        if hasattr(adapter, "residual_summary") and callable(getattr(adapter, "residual_summary")):
+            res_sum = adapter.residual_summary()
+            if res_sum is not None:
+                payload["residual_summary"] = res_sum
+        if args.get("export_path"):
+            payload["exported_to"] = str(args["export_path"])
+        return to_jsonable(payload)
+
+    study = VerificationStudy(
+        ds,
+        coordinate=args.get("coordinate"),
+        field=args.get("field"),
+        reference=args.get("reference"),
+        spacing_col=args.get("spacing_col"),
+        qoi_col=args.get("qoi_col"),
+    )
+    if action == "gci":
+        gci_res = study.grid_convergence(
+            spacings=[float(h) for h in args["spacings"]] if args.get("spacings") is not None else None,
+            quantities=[float(q) for q in args["quantities"]] if args.get("quantities") is not None else None,
+            formal_order=float(args.get("formal_order", 2.0)),
+            safety_factor=float(args.get("safety_factor", 1.25)),
+            gci_tol=float(args.get("gci_tol", 0.05)),
+            order_tol=float(args.get("order_tol", 0.5)),
+        )
+        if proj is not None and bool(args.get("record_run", True)):
+            proj.record_run("gci", gci_res, configuration={"adapter": adapter_name})
+        return to_jsonable(gci_res.to_dict())
+
+    if action == "reference_error":
+        ref_res = study.reference_error(
+            field=args.get("field"),
+            reference=args.get("reference"),
+            coordinate=args.get("coordinate"),
+            l2_tol=float(args["l2_tol"]) if args.get("l2_tol") is not None else None,
+            linf_tol=float(args["linf_tol"]) if args.get("linf_tol") is not None else None,
+        )
+        if proj is not None and bool(args.get("record_run", True)):
+            proj.record_run("reference_error", ref_res, configuration={"adapter": adapter_name})
+        return to_jsonable(ref_res.to_dict())
+
+    raise MCPToolError(f"Unsupported external import action '{action}'. Choose from: inspect, gci, reference_error.")
+
+
+def tool_screen_candidates(args: Mapping[str, Any]) -> Dict[str, Any]:
+    """Screen PySR hall_of_fame.csv or raw symbolic candidate expressions through Rosolver's 4-stage Pareto gatekeeper."""
+    from ..symbolic import CandidateImporter
+
+    target = args.get("target")
+    dims = args.get("dims")
+    if not target or not isinstance(dims, Mapping) or not dims:
+        raise MCPToolError("'target' and non-empty 'dims' mapping are required for rosolver_screen_candidates.")
+
+    proj = Project.open(str(args["project_dir"])) if args.get("project_dir") else None
+    data_map: Optional[Dict[str, np.ndarray]] = None
+    if args.get("data") or args.get("data_path") or args.get("csv_path") or args.get("dataset_name"):
+        data_map = _load_data_columns(args, proj=proj)
+
+    common_kwargs: Dict[str, Any] = {
+        "target": str(target),
+        "dims": {str(k): str(v) for k, v in dims.items()},
+        "data": data_map,
+        "operating_envelope": args.get("operating_envelope"),
+        "variable_map": args.get("variable_map"),
+        "sigma_y": args.get("sigma_y"),
+        "weights": args.get("weights"),
+        "missing_policy": str(args.get("missing_policy", "raise")),
+        "refit_numeric_constants": bool(args.get("refit_numeric_constants", True)),
+        "scale_threshold": float(args.get("scale_threshold", 100.0)),
+        "reject_non_identifiable": bool(args.get("reject_non_identifiable", False)),
+    }
+
+    if args.get("pysr_csv"):
+        report = CandidateImporter.from_pysr_csv(str(args["pysr_csv"]), **common_kwargs)
+    elif args.get("equations"):
+        eqs = [str(e) for e in args["equations"]]
+        report = CandidateImporter.from_expressions(eqs, **common_kwargs)
+    else:
+        raise MCPToolError("Provide either 'pysr_csv' path or 'equations' list.")
+
+    def _serialize_sc(sc: Any) -> Dict[str, Any]:
+        fit_summary: Optional[Dict[str, Any]] = None
+        if sc.fit_result is not None:
+            ident = getattr(sc.fit_result, "identifiability", None)
+            fit_summary = {
+                "params": dict(sc.fit_result.params),
+                "r2": float(sc.fit_result.r2),
+                "rmse": float(sc.fit_result.rmse),
+                "aic": float(sc.fit_result.aic),
+                "bic": float(sc.fit_result.bic),
+                "identifiable": bool(getattr(ident, "is_identifiable", True)) if ident is not None else None,
+                "admissibility_tier": sc.fit_result.admissibility_tier,
+            }
+        return {
+            "name": sc.candidate.name,
+            "raw_equation": sc.candidate.raw_equation,
+            "admissible": sc.admissible,
+            "status": sc.status.value,
+            "stage_results": dict(sc.stage_results),
+            "parsed_expression": sc.parsed_expression,
+            "calibrated_expression": sc.calibrated_expression,
+            "rejection_stage": sc.rejection_stage,
+            "rejection_reason": sc.rejection_reason,
+            "dimensional_consistent": sc.dimensional_consistent,
+            "scale_log10_gap": sc.scale_log10_gap,
+            "scale_diagnostic_code": sc.scale_diagnostic_code,
+            "fit": fit_summary,
+            "warnings": list(sc.warnings),
+        }
+
+    out: Dict[str, Any] = {
+        "target": report.target,
+        "source": report.source,
+        "status": report.status.value,
+        "total_imported": report.total_imported,
+        "n_admissible": len(report.admissible_candidates),
+        "n_rejected": len(report.rejected_candidates),
+        "best_candidate": _serialize_sc(report.best_candidate) if report.best_candidate is not None else None,
+        "admissible_candidates": [_serialize_sc(sc) for sc in report.admissible_candidates],
+        "rejected_candidates": [_serialize_sc(sc) for sc in report.rejected_candidates],
+        "warnings": list(report.warnings),
+        "summary": report.summary(),
+    }
+    if bool(args.get("export_claim_manifest", False)) or bool(args.get("register_manifest", False)):
+        manifest = report.to_claim_manifest(
+            study_title=str(args.get("study_title", f"Screened Symbolic Candidates ({report.target})")),
+        )
+        out["claim_manifest"] = manifest.to_dict()
+        if proj is not None and bool(args.get("register_manifest", False)):
+            reg_path = proj.register_claim_manifest(manifest)
+            out["registered_manifest_path"] = reg_path.relative_to(proj.root).as_posix()
+    return to_jsonable(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1489,12 +1869,13 @@ TOOL_SPECIFICATIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "rosolver_report",
-        "description": "Generate a deterministic ScientificReport (Markdown, JSON, or YAML + sidecar manifest) from a Rosolver Project workspace.",
+        "description": "Generate a deterministic ScientificReport (Markdown, JSON, YAML, LaTeX .tex, or compiled PDF + sidecar manifest) from a Rosolver Project workspace.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "project_dir": {"type": "string"},
                 "output": {"type": "string"},
+                "format": {"type": "string", "enum": ["markdown", "json", "yaml", "latex", "pdf"]},
                 "title": {"type": "string"},
                 "report_type": {"type": "string", "enum": list(REPORT_TYPES)},
                 "description": {"type": "string"},
@@ -1503,6 +1884,122 @@ TOOL_SPECIFICATIONS: List[Dict[str, Any]] = [
                 "also_manifest": {"type": "boolean"},
             },
             "required": ["project_dir"],
+        },
+    },
+    {
+        "name": "rosolver_check_scales",
+        "description": "Audit order-of-magnitude term balance across operating envelopes, diagnose implicit unit normalizations/differential shortcuts, or verify Euler elasticity sum rules.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "enum": ["scales", "normalization", "elasticities"]},
+                "equation": {"type": "string"},
+                "dims": {"type": "object"},
+                "operating_envelope": {"type": "object"},
+                "characteristic_scales": {"type": "object"},
+                "scale_threshold": {"type": "number"},
+                "negligible_ratio": {"type": "number"},
+                "target_dim": {"type": "string"},
+                "input_dims": {"type": "object"},
+                "elasticities": {"type": "object"},
+                "tol": {"type": "number"},
+                "data": {"type": "object"},
+            },
+        },
+    },
+    {
+        "name": "rosolver_audit_claims",
+        "description": "Run a deterministic scientific ClaimManifest audit round on a Project workspace, returning two-axis verdicts, ClarificationRequests, and a peer-review referee report.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_dir": {"type": "string"},
+                "manifest_path": {"type": "string"},
+                "manifest_yaml": {"type": "string"},
+                "manifest_dict": {"type": "object"},
+                "output": {"type": "string"},
+                "generate_report": {"type": "boolean"},
+            },
+            "required": ["project_dir"],
+        },
+    },
+    {
+        "name": "rosolver_submit_rebuttal",
+        "description": "Submit author rebuttals (CSV datasets, solver schemes, revised closures) against open ClarificationRequests and execute Round k+1 re-verification.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_dir": {"type": "string"},
+                "rebuttal_path": {"type": "string"},
+                "submissions": {"type": "array", "items": {"type": "object"}},
+                "generate_report": {"type": "boolean"},
+            },
+            "required": ["project_dir"],
+        },
+    },
+    {
+        "name": "rosolver_import_external",
+        "description": "Ingest external CFD/FEM/HDF5 simulation exports (OpenFOAM, FEniCSx/VTK/VTU/XDMF, HDF5, CSV) to inspect fields/residuals, run multi-grid Roache/Celik GCI, or compute reference-solution error norms.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "adapter": {"type": "string", "enum": ["openfoam", "fenicsx", "hdf5", "csv"]},
+                "action": {"type": "string", "enum": ["inspect", "gci", "reference_error"]},
+                "source": {"type": "string"},
+                "sources": {"type": "array", "items": {"type": "string"}},
+                "spacings": {"type": "array", "items": {"type": "number"}},
+                "quantities": {"type": "array", "items": {"type": "number"}},
+                "field": {"type": "string"},
+                "coordinate": {"type": "string"},
+                "reference": {"type": "string"},
+                "reducer": {"type": "string", "enum": ["mean", "max", "min", "l2", "first", "last"]},
+                "function_object": {"type": "string"},
+                "time": {"type": "string"},
+                "sample_file": {"type": "string"},
+                "group": {"type": "string"},
+                "units": {"type": "object"},
+                "element_family": {"type": "string"},
+                "element_degree": {"type": "integer"},
+                "formal_order": {"type": "number"},
+                "safety_factor": {"type": "number"},
+                "gci_tol": {"type": "number"},
+                "order_tol": {"type": "number"},
+                "l2_tol": {"type": "number"},
+                "linf_tol": {"type": "number"},
+                "export_path": {"type": "string"},
+                "project_dir": {"type": "string"},
+                "record_run": {"type": "boolean"},
+            },
+            "required": ["adapter"],
+        },
+    },
+    {
+        "name": "rosolver_screen_candidates",
+        "description": "Screen PySR hall_of_fame.csv or raw symbolic candidate expressions through Rosolver's 4-stage gatekeeper (AST whitelist -> dimensional/normalization -> scale-separation -> WLS/identifiability BIC ranking) with optional ClaimManifest export.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "dims": {"type": "object"},
+                "pysr_csv": {"type": "string"},
+                "equations": {"type": "array", "items": {"type": "string"}},
+                "data": {"type": "object"},
+                "data_path": {"type": "string"},
+                "dataset_name": {"type": "string"},
+                "project_dir": {"type": "string"},
+                "operating_envelope": {"type": "object"},
+                "variable_map": {"type": "object"},
+                "sigma_y": {},
+                "weights": {},
+                "missing_policy": {"type": "string", "enum": ["raise", "drop", "nan", "mask"]},
+                "refit_numeric_constants": {"type": "boolean"},
+                "scale_threshold": {"type": "number"},
+                "reject_non_identifiable": {"type": "boolean"},
+                "export_claim_manifest": {"type": "boolean"},
+                "register_manifest": {"type": "boolean"},
+                "study_title": {"type": "string"},
+            },
+            "required": ["target", "dims"],
         },
     },
 ]
@@ -1518,6 +2015,11 @@ TOOL_HANDLERS: Dict[str, Callable[[Mapping[str, Any]], Dict[str, Any]]] = {
     "rosolver_validate_results": tool_validate_results,
     "rosolver_project": tool_project,
     "rosolver_report": tool_report,
+    "rosolver_check_scales": tool_check_scales,
+    "rosolver_audit_claims": tool_audit_claims,
+    "rosolver_submit_rebuttal": tool_submit_rebuttal,
+    "rosolver_import_external": tool_import_external,
+    "rosolver_screen_candidates": tool_screen_candidates,
 }
 
 
@@ -1580,6 +2082,18 @@ def list_mcp_resources() -> List[Dict[str, Any]]:
             "description": "Definitions of Passed, Failed, Inconclusive, Warning, and NotAssessed plus non-certification notice.",
             "mimeType": "application/json",
         },
+        {
+            "uri": "rosolver://schema/claims",
+            "name": "Rosolver ClaimManifest & Rebuttal Schema",
+            "description": "Reference YAML structure for declarative scientific claim verification and R1->R2 author rebuttals.",
+            "mimeType": "text/yaml",
+        },
+        {
+            "uri": "rosolver://schema/adapters",
+            "name": "External CFD/FEM/HDF5 & PySR Adapter Reference",
+            "description": "Supported file formats, multi-grid GCI reducers, and 4-stage PySR Pareto screening gates.",
+            "mimeType": "application/json",
+        },
     ]
 
 
@@ -1612,6 +2126,7 @@ def read_mcp_resource(uri: str) -> Tuple[str, str]:
             json.dumps(
                 {
                     "base_dimensions": ["M", "L", "T", "I", "Theta", "N", "J", "rad"],
+                    "si_prefixes": {k: v for k, v in sorted(_SI_PREFIX_SCALE.items())},
                     "si_units": {k: v for k, v in sorted(SI_UNIT_TO_DIM.items())},
                 },
                 indent=2,
@@ -1636,6 +2151,50 @@ def read_mcp_resource(uri: str) -> Tuple[str, str]:
                 indent=2,
             ),
         )
+    if uri == "rosolver://schema/claims":
+        return (
+            "text/yaml",
+            (
+                "study_title: Example Manuscript Claim Audit\n"
+                "source_reference: paper_excerpt.txt\n"
+                "claims:\n"
+                "  - id: C1_balance_law\n"
+                "    title: Momentum / vapor-pressure balance\n"
+                "    kind: equation_law\n"
+                "    equations: ['rho * a + grad_P = 0']\n"
+                "    variables_units: {rho: 'kg/m^3', a: 'm/s^2', grad_P: 'Pa/m'}\n"
+                "    operating_envelope: {rho: [917, 917], a: [7e-14, 9e-14], grad_P: [880, 8850]}\n"
+                "  - id: C2_empirical_assay\n"
+                "    title: Solute rejection equivalence\n"
+                "    kind: qualitative_observation\n"
+                "    required_observables: ['solute_rejection_pct']\n"
+                "    claimed_metrics: {min_solute_rejection_pct: 90.0}\n"
+            ),
+        )
+    if uri == "rosolver://schema/adapters":
+        import json
+
+        return (
+            "application/json",
+            json.dumps(
+                {
+                    "external_adapters": {
+                        "openfoam": ["postProcessing/ sample (.xy, .csv, .dat)", "residuals.dat", "system/controlDict"],
+                        "fenicsx": ["ParaView VTK-CSV (.csv)", "Legacy ASCII VTK (.vtk)", "XML VTU (.vtu)", "Inline XDMF (.xdmf)"],
+                        "hdf5": ["Flat or hierarchical HDF5 (.h5, .hdf5) via rosolver[io]"],
+                        "csv": ["Generic CSV, JSON, NPZ exports"],
+                    },
+                    "multi_grid_reducers": ["mean", "max", "min", "l2", "first", "last"],
+                    "symbolic_screening_stages": [
+                        "1. AST whitelist parsing (P0.5)",
+                        "2. Dimensional homogeneity & normalization audit",
+                        "3. Order-of-magnitude scale-separation audit (Sprint 10)",
+                        "4. WLS calibration & Jacobian identifiability BIC ranking (P2.1)",
+                    ],
+                },
+                indent=2,
+            ),
+        )
     raise KeyError(f"Unknown resource URI: '{uri}'")
 
 
@@ -1651,10 +2210,26 @@ def list_mcp_prompts() -> List[Dict[str, Any]]:
         },
         {
             "name": "audit_external_solver",
-            "description": "Audit external CFD/FEM/research CSV outputs with Roache/Celik GCI and experimental ValidationStudy.",
+            "description": "Audit external CFD/FEM/HDF5/CSV solver outputs with OpenFOAM/FEniCSx/HDF5 adapters, Roache/Celik GCI, and experimental ValidationStudy.",
             "arguments": [
-                {"name": "csv_path", "description": "Path to external mesh-refinement CSV.", "required": True},
-                {"name": "qoi_col", "description": "Quantity of interest column name.", "required": True},
+                {"name": "csv_path", "description": "Path to external mesh-refinement CSV or solver case.", "required": True},
+                {"name": "qoi_col", "description": "Quantity of interest column or field name.", "required": True},
+            ],
+        },
+        {
+            "name": "peer_review_manuscript",
+            "description": "Extract untrusted manuscript claims into a ClaimManifest, run scale-balance and claim audits, and issue structured R1 author clarification requests.",
+            "arguments": [
+                {"name": "manuscript_excerpt", "description": "Text/equations/table extracted from the study under review.", "required": True},
+                {"name": "project_dir", "description": "Target Project directory for R1->R2 audit provenance.", "required": False},
+            ],
+        },
+        {
+            "name": "screen_symbolic_candidates",
+            "description": "Screen PySR hall_of_fame.csv or candidate equations through Rosolver's 4-stage dimensional, scale-balance, and WLS/BIC gatekeeper.",
+            "arguments": [
+                {"name": "pysr_csv", "description": "Path to PySR hall_of_fame.csv (or omit to pass inline equations).", "required": False},
+                {"name": "target", "description": "Target dependent variable name.", "required": True},
             ],
         },
     ]
@@ -1662,6 +2237,38 @@ def list_mcp_prompts() -> List[Dict[str, Any]]:
 
 def get_mcp_prompt(name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     args = dict(arguments or {})
+    if name == "screen_symbolic_candidates":
+        csv_p = args.get("pysr_csv", "<path/to/hall_of_fame.csv>")
+        target = args.get("target", "y")
+        text = (
+            f"Screen symbolic-regression candidates for target `{target}` using Rosolver MCP:\n\n"
+            f"Source: {csv_p}\n"
+            "Required sequence:\n"
+            "1. Call `rosolver_screen_candidates` with `target`, `dims`, `pysr_csv` (or `equations`), and `data`.\n"
+            "2. Report all rejected candidates and their exact rejection stage (`ast_parse`, `dimensional`, `scale_balance`, `calibration`).\n"
+            "3. Rank admissible candidates by WLS BIC and surface any `Warning` (non-identifiable / collinear) status verbatim.\n"
+            "4. Optionally pass `export_claim_manifest=true` to hand off to `rosolver_audit_claims`."
+        )
+        return {
+            "description": "4-stage deterministic screening of symbolic-regression Pareto candidates",
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
+    if name == "peer_review_manuscript":
+        excerpt = args.get("manuscript_excerpt", "<paste manuscript claims & tables>")
+        pdir = args.get("project_dir", "outputs/peer_review_audit")
+        text = (
+            f"Perform an independent deterministic peer-review audit using Rosolver MCP tools:\n\n"
+            f"Target project_dir: {pdir}\nManuscript excerpt:\n{excerpt}\n\n"
+            "Required sequence:\n"
+            "1. Map each equation, accuracy claim, and empirical observation into a `ClaimManifest` (`rosolver://schema/claims`).\n"
+            "2. Run `rosolver_check_scales` on every governing law across its operating envelope.\n"
+            "3. Initialize `project_dir` via `rosolver_project` (`action='init'`) and run `rosolver_audit_claims`.\n"
+            "4. Report every `Falsified`, `SchemeDependent`, and `Inconclusive` verdict verbatim (never override) and present the generated `ClarificationRequest` queries for author rebuttal."
+        )
+        return {
+            "description": "Deterministic scientific manuscript peer-review audit",
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
+        }
     if name == "formulate_and_verify_model":
         prob = args.get("problem_description", "<describe physical system>")
         pdir = args.get("project_dir", "outputs/mcp_study")

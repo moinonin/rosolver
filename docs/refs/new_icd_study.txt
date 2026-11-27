@@ -1,0 +1,44 @@
+Previous studies have strongly suggested that crystallizing out pure water from solutions through
+
+freezing may provide an efficient means of wastewater purification. In that regard, freeze crys-
+tallization is nowadays perceived as an edge-cutting technology for industrial concentration and
+
+currently being developed for application in areas such as wastewater treatment. Despite these
+developments, the kinetics involved have not yet been fully registered. For instance the changes
+
+brought by operating conditions and environmental factors such as temperature, humidity, radia-
+tion, and wind flow patterns. We have modeled natural freezing of water under simulated winter
+
+environment with an aim of understanding the underlying kinetics of a wastewater treatment pro-
+cess based on water layer crystallization. It is generally established that ice growth is driven by
+
+the heat transfer into and out of the liquid surface due to the evolving temperature gradient. This
+however does not always provide a way forward if the temperature is not the only influential factor,
+and that calls for studies involving other environmental conditions. In this case for instance, heat
+transfer is in turn affected by the wind flow patters, radiation, relative humidity, and the resulting
+
+vapor pressure differences. The overall effect is a continuous evolution in the vapor pressure gra-
+dient around the gas-liquid interface that greatly influence ice growth. We have derived accurate
+
+self-limiting models for direct correlation between the vapor pressure gradient, ∂p/∂z, the ice grain
+boundary migration acceleration, a and eventually growth rate, G in ms−1
+
+. Upon experimental
+validation and error analysis the numerical model, ρa + ∇P = 0 returned a minimal relative error
+of only 0.35%. In addition, ice samples produced from a local peat production settlement pond did
+not show significant physical observations different from samples produced from a fresh water lake,
+thus pointing to the fact that a significant achievement has been achieved with regards to physical
+water treatment (by this method), an important preliminary stage for water purification.
+
+
+Table 1: Table of simulation parameters in the numerical solution
+Parameter Size
+Water pond dimension 10×10m
+Density of ice, ρ 917 kgm−3
+Latent heat of freezing of H2O, 4H 3.34×105 Jkg−1
+Wind velocity, u 2 ms−1
+Temperature set, 4T -1◦C
+Time steps, n 12 each of dt=72000/12
+Initialization J, 4J 7.96412×10−6 kgm−2
+s
+Ice growth period t = 72000s or 20 hrs

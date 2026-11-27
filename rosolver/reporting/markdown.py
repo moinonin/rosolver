@@ -36,6 +36,8 @@ REPORT_TYPES: Tuple[str, ...] = (
     "solution_verification",
     "model_validation",
     "integrated_project",
+    "claim_verification",
+    "peer_review_letter",
 )
 
 _KIND_TO_REPORT_TYPE: Dict[str, str] = {
@@ -57,6 +59,13 @@ _KIND_TO_REPORT_TYPE: Dict[str, str] = {
     "validation": "model_validation",
     "model_validation": "model_validation",
     "integrated_project": "integrated_project",
+    "claim_audit": "claim_verification",
+    "claim_scale_audit": "claim_verification",
+    "claim_normalization_audit": "claim_verification",
+    "claim_scaling_audit": "claim_verification",
+    "claim_budget_audit": "claim_verification",
+    "claim_verification": "claim_verification",
+    "peer_review_letter": "peer_review_letter",
 }
 
 _STATUS_SEVERITY: Dict[VerificationStatus, int] = {
@@ -443,6 +452,12 @@ class ScientificReport(ResultMixin):
     def to_yaml(self) -> str:
         return yaml.safe_dump(self.to_dict(), sort_keys=False)
 
+    def to_latex(self) -> str:
+        """Render this report as a self-contained publication-ready LaTeX document."""
+        from .latex import render_report_latex
+
+        return render_report_latex(self)
+
     def _repr_markdown_(self) -> str:
         return self.to_markdown()
 
@@ -452,8 +467,9 @@ class ScientificReport(ResultMixin):
         fmt: Optional[str] = None,
         *,
         also_manifest: Union[bool, str, Path] = False,
+        latex_engine: str = "auto",
     ) -> Path:
-        """Write report to `.md`, `.json`, or `.yaml` without mutating simulation outputs."""
+        """Write report to `.md`, `.json`, `.yaml`, `.tex`, or `.pdf` without mutating simulation outputs."""
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         resolved_fmt = (fmt or out.suffix.lstrip(".") or "md").lower()
@@ -463,9 +479,17 @@ class ScientificReport(ResultMixin):
             out.write_text(self.to_json(), encoding="utf-8")
         elif resolved_fmt in ("yaml", "yml"):
             out.write_text(self.to_yaml(), encoding="utf-8")
+        elif resolved_fmt in ("tex", "latex"):
+            out.write_text(self.to_latex(), encoding="utf-8")
+        elif resolved_fmt == "pdf":
+            from .latex import compile_latex_to_pdf
+
+            tex_path = out.with_suffix(".tex")
+            tex_path.write_text(self.to_latex(), encoding="utf-8")
+            compile_latex_to_pdf(tex_path, output_pdf=out, engine=latex_engine)
         else:
             raise ValueError(
-                f"Unsupported report format '{resolved_fmt}'. Expected 'md', 'json', or 'yaml'."
+                f"Unsupported report format '{resolved_fmt}'. Expected 'md', 'json', 'yaml', 'tex', or 'pdf'."
             )
 
         if also_manifest:
@@ -788,4 +812,161 @@ class ReportGenerator:
             software=software,
             source_files=unique_sf,
             metadata={"project_id": project.project_id, "project_name": project.name},
+        )
+
+    @classmethod
+    def from_claim_round(
+        cls,
+        project: "Project",
+        round_record: Any,
+        *,
+        title: Optional[str] = None,
+        report_type: str = "peer_review_letter",
+        description: str = "",
+    ) -> ScientificReport:
+        """Build a structured Referee Report / Claim Verification `ScientificReport` from a `ReviewRoundRecord`."""
+        from ..project import capture_environment
+
+        if report_type not in ("claim_verification", "peer_review_letter"):
+            raise ValueError("report_type must be 'claim_verification' or 'peer_review_letter'.")
+
+        statuses: List[VerificationStatus] = [v.status for v in round_record.verdicts]
+        overall_status = _worst_status(statuses)
+
+        # Table 1: Executive Audit Scorecard
+        scorecard_rows = [
+            [
+                v.claim_id,
+                v.title,
+                v.kind.value,
+                v.assessment.mechanistic_status.value,
+                v.assessment.empirical_status.value,
+                v.overall_verdict.value,
+                ", ".join(v.evidence_run_ids) or "—",
+            ]
+            for v in round_record.verdicts
+        ]
+        tables: List[Dict[str, Any]] = [
+            {
+                "title": f"Executive Claim Audit Scorecard ({round_record.round_id})",
+                "headers": [
+                    "Claim ID",
+                    "Title",
+                    "Kind",
+                    "Mechanistic",
+                    "Empirical",
+                    "Verdict",
+                    "Evidence Run IDs",
+                ],
+                "rows": scorecard_rows,
+            }
+        ]
+
+        # Table 2: Open Clarification Requests (Referee Queries)
+        if round_record.open_requests:
+            req_rows = [
+                [
+                    r.request_id,
+                    r.claim_id,
+                    r.severity,
+                    r.trigger_code,
+                    r.required_artifact.kind,
+                    r.reviewer_prompt,
+                ]
+                for r in round_record.open_requests
+            ]
+            tables.append(
+                {
+                    "title": f"Referee Clarification & Data Requests ({round_record.round_id})",
+                    "headers": ["Request ID", "Claim", "Severity", "Trigger", "Required Artifact", "Reviewer Query"],
+                    "rows": req_rows,
+                }
+            )
+
+        # Table 3: Multi-Round Verdict Transitions (R_k -> R_{k+1})
+        if round_record.transitions:
+            tr_rows = [
+                [
+                    t.claim_id,
+                    t.prev_verdict,
+                    t.new_verdict,
+                    ", ".join(t.resolved_request_ids) or "—",
+                    ", ".join(t.remaining_request_ids) or "—",
+                    "Yes" if t.post_hoc_recalibration else "No",
+                ]
+                for t in round_record.transitions
+            ]
+            tables.append(
+                {
+                    "title": f"Rebuttal Transitions ({round_record.parent_round_id} -> {round_record.round_id})",
+                    "headers": [
+                        "Claim ID",
+                        "Previous",
+                        "Updated",
+                        "Resolved Requests",
+                        "Open Requests",
+                        "Post-Hoc Tuning Flag",
+                    ],
+                    "rows": tr_rows,
+                }
+            )
+
+        findings = [
+            {
+                "label": f"{v.claim_id} ({v.overall_verdict.value})",
+                "status": v.status.value,
+                "run_id": v.evidence_run_ids[0] if v.evidence_run_ids else None,
+                "detail": v.summary_text,
+            }
+            for v in round_record.verdicts
+        ]
+        warnings = [w for v in round_record.verdicts for w in v.warnings]
+        runs_summary = [
+            {
+                "run_id": rid,
+                "run_type": v.kind.value,
+                "status": v.status.value,
+                "timestamp": round_record.timestamp,
+                "metrics": v.metrics,
+                "output_result": f"claims/rounds/round_{round_record.round_index:03d}.json",
+            }
+            for v in round_record.verdicts
+            for rid in (v.evidence_run_ids or [f"{v.claim_id}_unrun"])
+        ]
+
+        eff_title = title or f"{project.name} — Peer-Review Claim Audit ({round_record.round_id})"
+        eff_desc = description or (
+            f"Deterministic scientific claim verification round {round_record.round_id} "
+            f"(manifest hash: {round_record.manifest_hash[:12]})."
+        )
+        limitations = [
+            "Audits mathematical, dimensional, scale-separation, numerical, and statistical consistency against supplied evidence; does not certify wet-lab specimen authenticity.",
+            _DEFAULT_NON_CERTIFICATION_NOTE,
+        ]
+        return ScientificReport(
+            title=eff_title,
+            report_type=report_type,
+            description=eff_desc,
+            status=overall_status,
+            model_info={},
+            datasets=[d.to_dict() for d in project.datasets],
+            numerical_config={"round_id": round_record.round_id, "manifest_hash": round_record.manifest_hash},
+            runs=runs_summary,
+            findings=findings,
+            figures=[],
+            tables=tables,
+            warnings=warnings,
+            limitations=limitations,
+            software=capture_environment(),
+            source_files=[
+                "claims/manifest.yaml",
+                f"claims/rounds/round_{round_record.round_index:03d}.json",
+                "claims/clarifications_open.json",
+            ],
+            metadata={
+                "project_id": project.project_id,
+                "project_name": project.name,
+                "round_id": round_record.round_id,
+                "summary_counts": round_record.summary_counts,
+            },
         )

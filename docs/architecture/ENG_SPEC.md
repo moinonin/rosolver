@@ -514,7 +514,8 @@ rosolver/
 ├── integrations/  # base.py, scipy.py, generic.py (+ optional fipy.py, fenics.py, openfoam.py)
 ├── io/            # yaml.py, json.py, csv.py, hdf5.py, project.py
 ├── reporting/     # markdown.py, pdf.py, plots.py, templates/
-├── ai/            # (v0.3+) interface.py, specification.py, candidate_generation.py
+├── mcp/           # server.py, tools.py (zero-dependency stdio JSON-RPC 2.0 server)
+├── claims/        # (v0.3.0) schema.py, scales.py, budget.py, clarifications.py, rebuttal.py, engine.py
 └── tests/         # unit/, integration/, benchmarks/, regression/
 ```
 
@@ -576,18 +577,22 @@ rosolver/
 
 ---
 
-### **Tier P5 — Post-`v0.2` Deferred Extensions**
+### **Tier P5 — Post-`v0.2` Rescoped Roadmap (`v0.3`–`v0.4`) & Archived Scope**
 
-#### **`P5.1` Desktop Application Strategy (`v0.3+`)**
-- **Technology:** **PySide6** (Qt for Python) as a strict presentation layer over the public Python API (no duplicated scientific algorithms).
-- **Major Views:** (A) Project explorer, (B) Model editor & dependency graph, (C) Symbolic analysis inspector, (D) Calibration workspace, (E) Simulation workspace, (F) V&V dashboard, (G) Reporting preview & export.
-- **Acceptance criteria:** Projects are 100% interchangeable between API, CLI, and GUI; GUI executes long computations asynchronously without blocking; core remains fully functional without PySide6 installed.
+#### **`P5.1` Desktop Application Strategy — 🗄️ Archived (Superseded by `rosolver-mcp` + CLI + Jupyter)**
+- **Decision (2026-11-27):** Standalone **PySide6** desktop Qt GUI is archived indefinitely unless funded as an external commercial wrapper (`P5.3`). Interactive agent workflows over `rosolver-mcp`, Jupyter notebooks, and the subcommand CLI deliver higher scientific leverage without ~5,000+ LOC Qt maintenance or cross-OS binary packaging overhead. External CFD/FEM adapters (`OpenFOAM`, `FEniCSx`, `HDF5`) and headless LaTeX/PDF report rendering remain active in **Slim Sprint 8 (`v0.3.1`)**.
 
-#### **`P5.2` AI-Assisted Scientific Modelling & Symbolic Regression Integration (`v0.4+`)**
-- **Principle:** *AI proposes. Rosolver evaluates. Scientific evidence determines acceptance.*
-- **Capabilities:** Natural-language physical description → structured `Model` draft, candidate equation/BC suggestions, missing-variable detection, diagnostic summaries, report drafting, plus **PySR** / symbolic-regression candidate ingestion.
-- **Guardrails:** AI outputs must map to structured `Model`/AST specs, declare all variables/units, pass deterministic schema + dimensional + V&V pipelines, require explicit human approval, record AI-proposed assumptions separately from verified facts, never auto-execute generated Python code, and remain strictly optional (zero API key required for core usage).
+#### **`P5.2` External Symbolic-Regression Ingestion (`v0.4.0` — Slim Sprint 9; LLM SDK Wrappers Dropped)**
+- **Principle:** *AI and symbolic-regression engines propose externally; Rosolver deterministically evaluates.*
+- **Rescoped Capabilities:** In-package vendor LLM SDK/API-key wrappers (`rosolver/ai/`) are dropped permanently in favor of `rosolver-mcp` (preserving a 100% offline, vendor-neutral core). **Slim Sprint 9 (`v0.4.0`)** retains a compact **PySR / external Pareto-front candidate importer** (`CandidateImporter` + optional `rosolver[pysr]`).
+- **Guardrails:** Imported symbolic-regression candidates must pass `parse_expr` (`P0.5`), dimensional homogeneity (`DimensionalEngine`), Sprint 10 scale-balance checks (`P5.4`), and WLS/identifiability diagnostics (`P2.1`), never auto-executing generated Python code.
 
 #### **`P5.3` Sustainability & Potential Commercial Extensions**
 - Keep the full scientific modelling, simulation, calibration, verification, CLI, Python API, and Markdown reporting core MIT open-source and usable offline without subscriptions.
 - Explore optional commercial extensions (e.g., Desktop Professional, institutional deployment, team workspaces, enterprise V&V packs, specialist adapters, hosted AI assistance) only after open-source user demand is validated.
+
+
+#### **`P5.4` Deterministic Scientific Claim Verification, Scale-Separation & Peer-Review Rebuttal Engine (`v0.3` Priority)**
+- **Principle:** *AI proposes claim mappings; Rosolver deterministically evaluates dimensional, scale-balance, numerical, and empirical support; unresolved gaps generate quantitative referee clarification queries.*
+- **Capabilities:** Declarative `ClaimManifest` (`rosolver/claims/`), operating-envelope order-of-magnitude term balance (`check_equation_scales`), implicit normalization & Euler elasticity sum-rule diagnostics, discretization-vs-claimed-error budget auditing (`audit_claimed_accuracy`), two-axis `ClaimVerdict` (`mechanistic_status` $\times$ `empirical_status`), deterministic `ClarificationRequest` generation, and SHA-256 multi-round `R1` $\to$ `R2` author rebuttal re-verification (`rosolver claim ...` CLI, `"peer_review_letter"` reports, and `rosolver-mcp` tools). See full sprint blueprint in [`SPRINTS.md`](SPRINTS.md).
+- **Acceptance criteria:** Zero external AI/LLM runtime dependencies in `rosolver` core; hard anti-override invariant (verdicts derive strictly from verified `ExecutionRecord` run IDs); separates theoretical plausibility from empirical lab proof; passes full `R1` $\to$ `R2` manuscript audit benchmarks.

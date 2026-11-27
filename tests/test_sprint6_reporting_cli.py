@@ -93,8 +93,8 @@ def _constitutive_calib_model() -> Model:
 # ---------------------------------------------------------------------------
 
 
-def test_report_types_cover_eight_canonical_scopes():
-    assert len(REPORT_TYPES) == 8
+def test_report_types_cover_canonical_scopes():
+    assert len(REPORT_TYPES) == 10
     assert set(REPORT_TYPES) == {
         "symbolic_derivation",
         "dimensional_analysis",
@@ -104,6 +104,8 @@ def test_report_types_cover_eight_canonical_scopes():
         "solution_verification",
         "model_validation",
         "integrated_project",
+        "claim_verification",
+        "peer_review_letter",
     }
 
 

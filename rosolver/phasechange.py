@@ -384,16 +384,21 @@ class Stefan1D:
         kappa = self.k_eff * (self.T_f - self.T_wall) / (self.rho * self.Lf)
         beta = self.h_c * (self.T_f - self.T_inf) / (self.rho * self.Lf)
         q0 = float(delta0) ** 2
+        t_uniq, inv_idx = np.unique(t_arr, return_inverse=True)
+        if t_uniq.size == 1 and float(t_uniq[0]) == 0.0:
+            out = np.full(t_arr.shape, float(delta0), dtype=float)
+            return float(out[0]) if scalar else out
 
         def rhs(_t: float, q: np.ndarray) -> np.ndarray:
             qq = max(float(q[0]), 1e-30)
             return np.array([2.0 * kappa + 2.0 * beta * np.sqrt(qq)])
 
-        sol = solve_ivp(rhs, (0.0, float(t_arr[-1])), [q0], method="BDF",
-                        t_eval=t_arr, rtol=1e-10, atol=1e-14)
+        t_start = min(0.0, float(t_uniq[0]))
+        sol = solve_ivp(rhs, (t_start, float(t_uniq[-1])), [q0], method="BDF",
+                        t_eval=t_uniq, rtol=1e-10, atol=1e-14)
         if not sol.success:
             raise RuntimeError(f"quasi-steady integration failed: {sol.message}")
-        out = np.sqrt(np.maximum(sol.y[0], 0.0))
+        out = np.sqrt(np.maximum(sol.y[0], 0.0))[inv_idx]
         return float(out[0]) if scalar else out
 
     # ---- surface closure ------------------------------------------------
@@ -455,7 +460,9 @@ class Stefan1D:
 
         film_rate = 0.0
         if self.film_enabled:
-            film_rate = ((supply - mdot_ice - self.mdot_evap
+            evap_avail = max(supply - mdot_ice, 0.0) + self.rho_w * h / self.tau_freeze
+            mdot_evap_eff = min(self.mdot_evap, evap_avail)
+            film_rate = ((supply - mdot_ice - mdot_evap_eff
                           - self.rho_w * h / self.tau_drain) / self.rho_w)
         return T_s, mdot_ice / self.rho, mdot_ice, ("wet" if wet else "dry"), film_rate
 
@@ -706,7 +713,12 @@ class Stefan1D:
             t_ev, idx = min(fired, key=lambda pair: pair[0])
             pre_z = np.asarray(sol.y_events[idx][0], dtype=float)
             pre = float(pre_z[m])
-            post = (1.0 - float(np.clip(events[idx].shed_fraction, 0.0, 1.0))) * pre
+            frac_s = float(np.clip(events[idx].shed_fraction, 0.0, 1.0))
+            if frac_s >= 1.0:
+                raise ValueError(
+                    f"Shedding event '{events[idx].name}' has shed_fraction=1.0; Landau front-fixing requires retained delta > 0 (use shed_fraction < 1.0)."
+                )
+            post = (1.0 - frac_s) * pre
             seg_t = np.append(sol.t[sol.t < t_ev], t_ev)
             seg_z = np.vstack([sol.y.T[sol.t < t_ev], pre_z])
             t_segs.append(seg_t)
@@ -719,15 +731,16 @@ class Stefan1D:
             # (1 - shed_fraction) fraction of the old profile. Resample that part
             # onto the full xi grid of the thinner layer so physical temperatures
             # are continuous across the reset.
-            h_pre = float(pre_z[m + 1]) if self.film_enabled else 0.0
-            T_s_pre = self._branch_state(pre_z[:m], pre, h_pre)[0]
-            T_old = np.concatenate(([self.T_wall], pre_z[:m], [T_s_pre]))
-            pre_z[:m] = np.interp(self.xi[1:-1] * (post / pre), self.xi, T_old)
-            pre_z[m] = post
+            post_z = pre_z.copy()
+            h_pre = float(post_z[m + 1]) if self.film_enabled else 0.0
+            T_s_pre = self._branch_state(post_z[:m], pre, h_pre)[0]
+            T_old = np.concatenate(([self.T_wall], post_z[:m], [T_s_pre]))
+            post_z[:m] = np.interp(self.xi[1:-1] * (post / pre), self.xi, T_old)
+            post_z[m] = post
             if self.film_enabled:
-                pre_z[m + 1] = 0.0  # surface water leaves with the shed slab
-            z_curr = pre_z
-            t_curr = t_ev + 1e-9
+                post_z[m + 1] = 0.0  # surface water leaves with the shed slab
+            z_curr = post_z
+            t_curr = t_ev + max(1e-12 * max(abs(t_end - t0), abs(t_ev)), 1e-15)
 
         t_all = np.concatenate(t_segs) if t_segs else np.array([t0])
         Z_all = np.vstack(z_segs) if z_segs else self.initial_state(delta0).reshape(1, -1)

@@ -12,13 +12,17 @@ from ..simulate import (
     plot_stefan,
     plot_validation,
 )
+from .latex import LatexReportRenderer, compile_latex_to_pdf, escape_latex, render_report_latex
 from .markdown import REPORT_TYPES, ReportGenerator, ScientificReport
 
 __all__ = [
+    "LatexReportRenderer",
     "REPORT_TYPES",
     "ReportGenerator",
     "ScientificReport",
     "SimulationResult",
+    "compile_latex_to_pdf",
+    "escape_latex",
     "plot_conservation_audit",
     "plot_gci_study",
     "plot_hybrid",
@@ -28,4 +32,5 @@ __all__ = [
     "plot_stability_spectrum",
     "plot_stefan",
     "plot_validation",
+    "render_report_latex",
 ]

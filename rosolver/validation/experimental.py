@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 import numpy as np
 
 from ..data import Dataset
-from ..dimensions import Dimension
+from ..dimensions import Dimension, convert_unit_values, parse_unit_factor
 from ..results import ResultMixin, VerificationStatus
 
 
@@ -124,6 +124,8 @@ class ValidationStudy:
         exp_arr = np.atleast_1d(np.asarray(experiment, dtype=float)).reshape(-1)
         if sim_arr.size != exp_arr.size or sim_arr.size == 0:
             raise ValueError("Simulation and experiment arrays must be non-empty and have equal length.")
+        if not (np.all(np.isfinite(sim_arr)) and np.all(np.isfinite(exp_arr))):
+            raise ValueError("Simulation and experiment arrays must contain only finite values (no NaN/Inf).")
         if coverage_factor <= 0.0:
             raise ValueError("coverage_factor must be positive.")
 
@@ -278,34 +280,52 @@ class ValidationStudy:
     ) -> ValidationReport:
         sim_u_str = sim_dataset.units.get(field)
         exp_u_str = exp_dataset.units.get(field)
+        sim_vals = sim_dataset.column(field).copy()
+        exp_vals = exp_dataset.column(field)
+        exp_u = exp_dataset.uncertainty_for(field)
+        u_num_resolved = u_num if u_num is not None else sim_dataset.uncertainty_for(field)
+
         if sim_u_str and exp_u_str:
             if Dimension.from_unit(sim_u_str) != Dimension.from_unit(exp_u_str):
                 raise ValueError(
                     f"Unit mismatch for field '{field}': simulation '{sim_u_str}' vs experiment '{exp_u_str}'."
                 )
+            if sim_u_str.strip() != exp_u_str.strip():
+                sim_vals = convert_unit_values(sim_vals, sim_u_str, exp_u_str)
+                if u_num_resolved is not None:
+                    _, s_sim, _ = parse_unit_factor(sim_u_str)
+                    _, s_exp, _ = parse_unit_factor(exp_u_str)
+                    u_num_resolved = np.asarray(u_num_resolved, dtype=float) * (s_sim / s_exp)
         unit = exp_u_str or sim_u_str or "1"
-
-        sim_vals = sim_dataset.column(field)
-        exp_vals = exp_dataset.column(field)
-        exp_u = exp_dataset.uncertainty_for(field)
 
         coord_name = coord or (next(iter(exp_dataset.coordinates), None))
         coords = None
-        u_num_resolved = u_num if u_num is not None else sim_dataset.uncertainty_for(field)
+        extrapolated_msg: Optional[str] = None
 
         if coord_name is not None and coord_name in exp_dataset.coordinates:
             exp_c = exp_dataset.column(coord_name)
             coords = exp_c
             if coord_name in sim_dataset.coordinates:
                 sim_c = sim_dataset.column(coord_name)
+                c_sim_u = sim_dataset.units.get(coord_name)
+                c_exp_u = exp_dataset.units.get(coord_name)
+                if c_sim_u and c_exp_u and c_sim_u.strip() != c_exp_u.strip():
+                    sim_c = convert_unit_values(sim_c, c_sim_u, c_exp_u)
                 if sim_c.shape != exp_c.shape or not np.allclose(sim_c, exp_c, rtol=1e-12, atol=1e-12):
                     order = np.argsort(sim_c)
+                    sim_min, sim_max = float(sim_c[order[0]]), float(sim_c[order[-1]])
+                    span_tol = 1e-12 * max(abs(sim_max - sim_min), 1.0)
+                    if float(np.min(exp_c)) < sim_min - span_tol or float(np.max(exp_c)) > sim_max + span_tol:
+                        extrapolated_msg = (
+                            f"Experimental '{coord_name}' range [{float(np.min(exp_c)):.4g}, {float(np.max(exp_c)):.4g}] "
+                            f"extends outside simulation domain [{sim_min:.4g}, {sim_max:.4g}]; boundary clamping applied."
+                        )
                     sim_vals = np.interp(exp_c, sim_c[order], sim_vals[order])
                     if isinstance(u_num_resolved, (Sequence, np.ndarray)) and np.asarray(u_num_resolved).size == sim_c.size:
                         u_arr = np.asarray(u_num_resolved, dtype=float)
                         u_num_resolved = np.interp(exp_c, sim_c[order], u_arr[order])
 
-        return cls.compare(
+        rep = cls.compare(
             simulation=sim_vals,
             experiment=exp_vals,
             field=field,
@@ -320,3 +340,9 @@ class ValidationStudy:
             error_tol=error_tol,
             study_name=study_name or f"{sim_dataset.name}_vs_{exp_dataset.name}",
         )
+        if extrapolated_msg is not None:
+            rep.warnings.append(extrapolated_msg)
+            if rep.status == VerificationStatus.PASSED:
+                rep.status = VerificationStatus.WARNING
+                rep.passed = False
+        return rep

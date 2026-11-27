@@ -1,0 +1,218 @@
+model:
+  name: cardiovascular_lifespan_coupled
+  version: "1.0"
+  domain: cardiovascular_biophysics
+  description: >
+    Coupled human cardiovascular aging, vascular network remodeling, hemodynamic
+    heart-rate regulation H = f(a(t), v(t), D(t)), cumulative biomechanical fatigue
+    Omega(t), and Gompertz-Makeham-Cox population survival S(t) for average lifespan E[L].
+variables:
+  independent:
+    - name: t
+      symbol: t
+      unit: s
+      description: Elapsed time from young-adult reference baseline (age 20 yr)
+  dependent:
+    - name: a
+      symbol: a
+      unit: s
+      positive: true
+      description: Biological/chronological age trajectory a(t)
+    - name: D
+      symbol: D
+      unit: m
+      positive: true
+      description: Effective arterial lumen diameter D_eff(t) across vascular tree
+    - name: v
+      symbol: v
+      unit: m/s
+      positive: true
+      description: Mean systemic/aortic arterial blood flow velocity v(t)
+    - name: S
+      symbol: S
+      unit: "1"
+      positive: true
+      description: Cohort survival probability S(t) = P(T_death > a_adult + t)
+    - name: M
+      symbol: M
+      unit: "1"
+      description: Cumulative cohort mortality probability M(t) = 1 - S(t)
+    - name: E_rem
+      symbol: E_rem
+      unit: s
+      description: Running integral int_0^t S(tau) dtau for expected remaining adult lifespan
+    - name: Omega
+      symbol: Omega
+      unit: "1"
+      description: Miner-Palmgren cumulative cardiac-vascular biomechanical fatigue index
+parameters:
+  - name: kappa_a
+    symbol: kappa_a
+    unit: "1"
+    status: fixed
+    value: 1.0
+    description: Biological aging rate factor da/dt
+  - name: D_min
+    symbol: D_min
+    unit: m
+    status: fixed
+    value: 0.0170
+    description: Asymptotic stenotic/remodelled effective arterial lumen diameter floor
+  - name: k_D
+    symbol: k_D
+    unit: 1/s
+    status: fixed
+    value: 5.70386e-10
+    description: Secular arterial lumen narrowing rate (0.018 yr^-1)
+  - name: v_min
+    symbol: v_min
+    unit: m/s
+    status: fixed
+    value: 0.62
+    description: Baseline senescent aortic flow velocity asymptote
+  - name: k_v
+    symbol: k_v
+    unit: 1/s
+    status: fixed
+    value: 4.43633e-10
+    description: Secular aortic velocity relaxation rate (0.014 yr^-1)
+  - name: c_sten
+    symbol: c_sten
+    unit: m^2/s^2
+    status: fixed
+    value: 1.25e-13
+    description: Convective lumen-stenosis acceleration coupling coefficient
+  - name: H_base
+    symbol: H_base
+    unit: 1/s
+    status: fixed
+    value: 0.7833333333
+    description: Intrinsic vagally toned sinoatrial pacemaker baseline (47.0 bpm)
+  - name: kappa_mat
+    symbol: kappa_mat
+    unit: "1"
+    status: fixed
+    value: 3.629124e7
+    description: Developmental autonomic maturation constant in H(a, v, D)
+  - name: kappa_hemo
+    symbol: kappa_hemo
+    unit: "1"
+    status: fixed
+    value: 0.0066
+    description: Dimensionless inverse-Strouhal hemodynamic coupling weight on v/D
+  - name: H_ref
+    symbol: H_ref
+    unit: 1/s
+    status: fixed
+    value: 1.0833333333
+    description: Reference adult resting heart rate (65.0 bpm = 1.0833 Hz)
+  - name: beta_H
+    symbol: beta_H
+    unit: s
+    status: fixed
+    value: 0.90
+    description: Cox proportional-hazards heart-rate coefficient (0.015 bpm^-1 = 0.90 s)
+  - name: lam_ext
+    symbol: lam_ext
+    unit: 1/s
+    status: fixed
+    value: 6.97138e-12
+    description: Makeham extrinsic age-independent hazard (2.2e-4 yr^-1)
+  - name: alpha_G
+    symbol: alpha_G
+    unit: 1/s
+    status: fixed
+    value: 8.39735e-12
+    description: Gompertz baseline mortality rate at age 20 yr (2.65e-4 yr^-1)
+  - name: gamma_G
+    symbol: gamma_G
+    unit: 1/s
+    status: fixed
+    value: 2.78855e-9
+    description: Gompertz exponential aging slope (0.088 yr^-1)
+  - name: a_adult
+    symbol: a_adult
+    unit: s
+    status: fixed
+    value: 6.31152e8
+    description: Young-adult reference age 20 yr in seconds
+  - name: N_budget
+    symbol: N_budget
+    unit: "1"
+    status: fixed
+    value: 2.90e9
+    description: Characteristic adult cardiac-cycle fatigue budget
+  - name: M_vasc
+    symbol: M_vasc
+    unit: "1"
+    status: fixed
+    value: 4.80e11
+    description: Characteristic cumulative vascular convective turnover fatigue budget
+dependencies:
+  - "a = fn(t)"
+  - "D = fn(t; k_D, D_min)"
+  - "v = fn(t, D; k_v, v_min, c_sten)"
+equations:
+  - id: age_ode
+    type: ode
+    expression: "da/dt = kappa_a"
+    description: Chronological/biological age progression
+  - id: diameter_ode
+    type: ode
+    expression: "dD/dt = -k_D * (D - D_min)"
+    description: Effective arterial lumen remodeling / atherosclerotic narrowing
+  - id: velocity_ode
+    type: ode
+    expression: "dv/dt = -k_v * (v - v_min) + c_sten / D"
+    description: Mean systemic arterial blood velocity drift with stenotic acceleration
+  - id: survival_ode
+    type: ode
+    expression: "dS/dt = -(lam_ext + alpha_G * exp(gamma_G * (a - a_adult))) * exp(beta_H * ((H_base + kappa_mat / a + kappa_hemo * v / D) - H_ref)) * S"
+    description: Time-varying Gompertz-Makeham-Cox survival probability driven by H(a,v,D)
+  - id: mortality_ode
+    type: ode
+    expression: "dM/dt = (lam_ext + alpha_G * exp(gamma_G * (a - a_adult))) * exp(beta_H * ((H_base + kappa_mat / a + kappa_hemo * v / D) - H_ref)) * S"
+    description: Complementary cumulative mortality (conserves S + M = 1)
+  - id: expectancy_ode
+    type: ode
+    expression: "dE_rem/dt = S"
+    description: Running integral of survival curve yielding expected remaining adult lifespan
+  - id: fatigue_ode
+    type: ode
+    expression: "dOmega/dt = (H_base + kappa_mat / a + kappa_hemo * v / D) / N_budget + (v / D) / M_vasc"
+    description: Coupled Miner-Palmgren cardiac-cycle and endothelial shear fatigue accumulation
+conditions:
+  initial:
+    - kind: initial
+      field: a
+      value: 6.31152e8
+    - kind: initial
+      field: D
+      value: 0.024
+    - kind: initial
+      field: v
+      value: 0.88
+    - kind: initial
+      field: S
+      value: 1.0
+    - kind: initial
+      field: M
+      value: 0.0
+    - kind: initial
+      field: E_rem
+      value: 0.0
+    - kind: initial
+      field: Omega
+      value: 0.0
+  boundary: []
+numerics:
+  solver: ODESystem
+  time_integrator: rk4
+  dt: 7.8894e6
+  tolerances:
+    rtol: 1.0e-9
+    atol: 1.0e-12
+assumptions:
+  - Arterial network diameters {D_k(t)} reduce via Murray/Poiseuille hydraulic equivalence to effective lumen caliber D(t).
+  - Instantaneous heart rate follows the Clairaut + Buckingham-Pi affine closure H(a,v,D) = H_base + kappa_mat/a + kappa_hemo*(v/D).
+  - Cohort survival S(t) obeys Gompertz-Makeham-Cox proportional hazards modulated by time-varying H(a(t), v(t), D(t)), strictly conserving S(t) + M(t) = 1.

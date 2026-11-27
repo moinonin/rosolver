@@ -1,0 +1,127 @@
+model:
+  name: ice_nucleation_to_solid_growth
+  version: "1.0"
+  domain: phase_change_crystallization
+  description: >
+    Dimensionally closed multi-scale model of ice growth from discrete nucleation
+    (dN/dt = beta) through self-limiting variable-mass crystal growth
+    (N*dm/dt = beta*(m_max - m)) to macroscopic 1D solid front kinematics and
+    Euler pressure-gradient balance (d2z/dt2 = -(1/rho)*dp/dz).
+variables:
+  independent:
+    - name: t
+      symbol: t
+      unit: s
+      description: Elapsed freezing time
+  dependent:
+    - name: N
+      symbol: N
+      unit: 1/m^3
+      positive: true
+      description: Ice particle number concentration per unit volume (n / V_sys)
+    - name: m
+      symbol: m
+      unit: kg
+      description: Solid ice mass (m = rho * sigma * z)
+    - name: m_liq
+      symbol: m_liq
+      unit: kg
+      description: Remaining available supercooled liquid mass (conserves m + m_liq = m_max)
+    - name: z
+      symbol: z
+      unit: m
+      description: Macroscopic 1D ice growth front length
+    - name: vz
+      symbol: vz
+      unit: m/s
+      description: Macroscopic growth front velocity dz/dt
+    - name: P_imp
+      symbol: P_imp
+      unit: Pa*s/m
+      description: Time-integrated crystallization pressure gradient int_0^t (dp/dz) dtau
+parameters:
+  - name: beta
+    symbol: beta
+    unit: 1/(m^3*s)
+    status: fixed
+    value: 200.0
+    description: Volumetric ice nucleation rate (new nuclei per m^3 per second)
+  - name: rho
+    symbol: rho
+    unit: kg/m^3
+    status: fixed
+    value: 917.0
+    description: Constant solid ice Ih density
+  - name: sigma
+    symbol: sigma
+    unit: m^2
+    status: fixed
+    value: 0.01
+    description: Cross-sectional growth slab area A (dV = sigma * dz)
+  - name: m_max
+    symbol: m_max
+    unit: kg
+    status: fixed
+    value: 0.4585
+    description: Saturation ice mass capacity (rho * sigma * z_max with z_max = 0.05 m)
+dependencies:
+  - "N = fn(t; beta)"
+  - "m = fn(N; beta, m_max)"
+  - "z = fn(m; rho, sigma)"
+equations:
+  - id: nucleation_ode
+    type: ode
+    expression: "dN/dt = beta"
+    description: Constant-rate volumetric ice nucleation
+  - id: mass_growth_ode
+    type: ode
+    expression: "dm/dt = (beta / N) * (m_max - m)"
+    description: Self-limiting crystal mass growth from variable-mass balance
+  - id: liquid_depletion_ode
+    type: ode
+    expression: "dm_liq/dt = -(beta / N) * (m_max - m)"
+    description: Supercooled liquid reservoir depletion (conserves m + m_liq = m_max)
+  - id: front_length_ode
+    type: ode
+    expression: "dz/dt = vz"
+    description: Macroscopic 1D ice growth front kinematic relation
+  - id: front_momentum_ode
+    type: ode
+    expression: "dvz/dt = -2.0 * (beta / N) * vz"
+    description: Eq. (16) deceleration d2z/dt2 = -(1/rho)*dp/dz = -(1/(sigma*rho))*m_ddot_opposing
+  - id: pressure_impulse_ode
+    type: ode
+    expression: "dP_imp/dt = 2.0 * rho * (beta / N) * vz"
+    description: Integrated opposing pressure gradient dp/dz = -rho*d2z/dt2 (conserves rho*vz + P_imp)
+conditions:
+  initial:
+    - kind: initial
+      field: N
+      value: 10000.0
+    - kind: initial
+      field: m
+      value: 0.004585
+    - kind: initial
+      field: m_liq
+      value: 0.453915
+    - kind: initial
+      field: z
+      value: 0.0005
+    - kind: initial
+      field: vz
+      value: 0.00099
+    - kind: initial
+      field: P_imp
+      value: 0.0
+  boundary: []
+numerics:
+  solver: ODESystem
+  time_integrator: rk4
+  dt: 0.5
+  tolerances:
+    rtol: 1.0e-10
+    atol: 1.0e-13
+assumptions:
+  - Constant solid ice density rho = 917 kg/m^3 and cross-sectional area sigma = 0.01 m^2 (dV = sigma * dz).
+  - Unit reference mass in draft (1 - rho*V) is dimensionally closed as (m_max - rho*sigma*z).
+  - Initial velocity vz(0) = (beta / N0) * (z_max - z0) matches exact first-order growth rate so Eq. (16) is identically consistent with dm/dt.

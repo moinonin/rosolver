@@ -291,6 +291,56 @@ class Model:
             out[p.symbol or p.name] = p.unit
         return out
 
+    def _dim_map(self) -> Dict[str, Dimension]:
+        out: Dict[str, Dimension] = {}
+        for v in self.all_variables():
+            out[v.symbol or v.name] = v.dim
+        for p in self.parameters:
+            out[p.symbol or p.name] = p.dim
+        return out
+
+    def _has_physical_units(self) -> bool:
+        return any(not d.is_dimensionless for d in self._dim_map().values())
+
+    def _check_dim_pair(self, eq_id: str, lhs: sp.Expr, rhs: sp.Expr, errors: List[str]) -> None:
+        if not self._has_physical_units():
+            return
+        from .claims.scales import _expr_dimension
+
+        dim_map = self._dim_map()
+        if not all(s.name in dim_map for s in (lhs.free_symbols | rhs.free_symbols) if isinstance(s, sp.Symbol)):
+            return
+        d_l, e_l = _expr_dimension(lhs, dim_map)
+        d_r, e_r = _expr_dimension(rhs, dim_map)
+        for msg in e_l + e_r:
+            errors.append(f"Dimensional inconsistency in equation '{eq_id}': {msg}")
+        if not (e_l or e_r) and lhs != 0 and rhs != 0 and d_l is not None and d_r is not None and d_l != d_r:
+            errors.append(
+                f"Dimensional mismatch in equation '{eq_id}': LHS [{d_l}] != RHS [{d_r}]."
+            )
+
+    def _check_expr_has_dim(
+        self,
+        eq_id: str,
+        expr: sp.Expr,
+        expected: Dimension,
+        dim_map: Mapping[str, Dimension],
+        errors: List[str],
+    ) -> None:
+        if not self._has_physical_units() or expr == 0:
+            return
+        from .claims.scales import _expr_dimension
+
+        if not all(s.name in dim_map for s in expr.free_symbols if isinstance(s, sp.Symbol)):
+            return
+        d_e, errs = _expr_dimension(expr, dim_map)
+        for msg in errs:
+            errors.append(f"Dimensional inconsistency in equation '{eq_id}': {msg}")
+        if not errs and d_e is not None and d_e != expected:
+            errors.append(
+                f"Dimensional mismatch in equation '{eq_id}': expected [{expected}], got [{d_e}]."
+            )
+
     def parameter_values(self, overrides: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         vals: Dict[str, Any] = {}
         for p in self.parameters:
@@ -331,22 +381,44 @@ class Model:
             if eq.type in ("algebraic", "constitutive") and eq.expression:
                 rhs_txt = eq.expression.split("=", 1)[1] if "=" in eq.expression else eq.expression
                 try:
-                    parse_expr(rhs_txt)
+                    rhs_e = parse_expr(rhs_txt)
+                    if "=" in eq.expression:
+                        lhs_e = parse_expr(eq.expression.split("=", 1)[0])
+                        self._check_dim_pair(eq.id, lhs_e, rhs_e, errors)
                 except Exception as exc:
                     errors.append(f"Invalid expression in equation '{eq.id}': {exc}")
             elif eq.type == "ode" and eq.expression:
                 try:
-                    self._parse_ode_equation(eq)
+                    st_name, ind_name, rhs_e = self._parse_ode_equation(eq)
+                    dim_map = self._dim_map()
+                    if st_name in dim_map and ind_name in dim_map:
+                        lhs_dim = dim_map[st_name] / dim_map[ind_name]
+                        self._check_expr_has_dim(eq.id, rhs_e, lhs_dim, dim_map, errors)
                 except Exception as exc:
                     errors.append(f"Invalid ODE equation '{eq.id}': {exc}")
             elif eq.type == "pde":
                 try:
+                    dim_map = self._dim_map()
                     if eq.expression and not (eq.flux or eq.diffusivity or eq.source):
-                        self._parse_pde_equation(eq)
+                        fld, x_n, t_n, flx, diff_e, src_e = self._parse_pde_equation(eq)
                     else:
-                        for part in (eq.flux, eq.diffusivity, eq.source):
-                            if part:
-                                parse_expr(part)
+                        fld = eq.field or (self.dependent_variables[0].symbol or self.dependent_variables[0].name if self.dependent_variables else "")
+                        indep_syms = [v.symbol or v.name for v in self.independent_variables]
+                        x_n = indep_syms[0] if len(indep_syms) >= 1 else "x"
+                        t_n = indep_syms[1] if len(indep_syms) >= 2 else "t"
+                        flx = parse_expr(eq.flux) if eq.flux else sp.Integer(0)
+                        diff_e = parse_expr(eq.diffusivity) if eq.diffusivity else sp.Integer(0)
+                        src_e = parse_expr(eq.source) if eq.source else sp.Integer(0)
+                    if fld in dim_map and x_n in dim_map and t_n in dim_map:
+                        rate_dim = dim_map[fld] / dim_map[t_n]
+                        if flx != 0:
+                            self._check_expr_has_dim(f"{eq.id}.flux", flx, rate_dim * dim_map[x_n], dim_map, errors)
+                        if diff_e != 0:
+                            self._check_expr_has_dim(
+                                f"{eq.id}.diffusivity", diff_e, (dim_map[x_n] ** 2) / dim_map[t_n], dim_map, errors
+                            )
+                        if src_e != 0:
+                            self._check_expr_has_dim(f"{eq.id}.source", src_e, rate_dim, dim_map, errors)
                 except Exception as exc:
                     errors.append(f"Invalid PDE equation '{eq.id}': {exc}")
 
@@ -631,13 +703,31 @@ class Model:
         d2_sym = real_symbol(d2_tok)
         d1_sym = real_symbol(d1_tok)
         fld_sym = real_symbol(fld)
+        x_sym = real_symbol(x_name)
         diff_expr = sp.simplify(sp.diff(expr, d2_sym))
         adv_rhs = sp.simplify(sp.diff(expr, d1_sym))
         if diff_expr.has(d2_sym) or diff_expr.has(d1_sym) or adv_rhs.has(d2_sym) or adv_rhs.has(d1_sym):
             raise ModelValidationError(
                 f"PDE equation '{eq.id}' must be linear in first/second spatial derivatives or specify flux/diffusivity explicitly."
             )
+        if adv_rhs != 0 and sp.simplify(sp.diff(adv_rhs, x_sym)) != 0:
+            raise ModelValidationError(
+                f"PDE equation '{eq.id}' has spatially varying non-divergence advection ({adv_rhs})*d{fld}/d{x_name}; "
+                "specify conservative 'flux' and 'source' explicitly."
+            )
+        if diff_expr != 0 and (
+            sp.simplify(sp.diff(diff_expr, x_sym)) != 0 or sp.simplify(sp.diff(diff_expr, fld_sym)) != 0
+        ):
+            raise ModelValidationError(
+                f"PDE equation '{eq.id}' has variable/nonlinear non-divergence diffusion ({diff_expr})*d2{fld}/d{x_name}2; "
+                "specify conservative 'diffusivity' explicitly."
+            )
         flux_expr = sp.Integer(0) if adv_rhs == 0 else sp.integrate(-adv_rhs, fld_sym)
+        if flux_expr.has(sp.Integral):
+            raise ModelValidationError(
+                f"PDE equation '{eq.id}' advection term '{adv_rhs}' could not be integrated into closed-form flux; "
+                "specify 'flux' explicitly."
+            )
         src_expr = sp.simplify(expr.subs({d2_sym: 0, d1_sym: 0}))
         return fld, x_name, t_name, flux_expr, diff_expr, src_expr
 
@@ -718,6 +808,29 @@ class Model:
             timing_s=elapsed,
             assumptions=list(self.assumptions),
         )
+
+    def resolved_ode_initial_conditions(
+        self,
+        override: Any = None,
+        state_names: Optional[Sequence[str]] = None,
+        params: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, float]:
+        """Resolve ODE initial conditions (both `value:` and parameter-dependent `expression:`) to floats."""
+        states = list(state_names) if state_names is not None else [eq_s[0] for eq_s in [self._parse_ode_equation(e) for e in self.equations if e.type == "ode"]]
+        raw_map = self._extract_initial_conditions(override, states)
+        p_vals = self.parameter_values(params)
+        psubs = {real_symbol(k): sp.Float(float(v)) for k, v in p_vals.items() if isinstance(v, (int, float, np.number))}
+        resolved: Dict[str, float] = {}
+        for s in states:
+            if s not in raw_map:
+                continue
+            item = raw_map[s]
+            if isinstance(item, str):
+                expr_ic = parse_expr(item).xreplace(psubs)
+                resolved[s] = float(expr_ic.evalf())
+            else:
+                resolved[s] = float(item)
+        return resolved
 
     def _extract_initial_conditions(
         self,
@@ -903,14 +1016,10 @@ class Model:
         if "ode" in eq_types:
             ode = self.to_ode_system()
             span = t_span or (0.0, 1.0)
-            y0_map = self._extract_initial_conditions(initial_conditions, ode.states)
-            missing_ic = [s for s in ode.states if s not in y0_map]
+            y0_resolved = self.resolved_ode_initial_conditions(initial_conditions, ode.states, params=p_vals)
+            missing_ic = [s for s in ode.states if s not in y0_resolved]
             if missing_ic:
                 raise ModelValidationError(f"Missing initial condition(s) for ODE state(s) {missing_ic}.")
-            y0_resolved = {
-                s: float(parse_expr(y0_map[s]).evalf()) if isinstance(y0_map[s], str) else float(y0_map[s])
-                for s in ode.states
-            }
             traj = ode.solve(
                 t_span=span,
                 y0=y0_resolved,

@@ -48,14 +48,18 @@ def test_mcp_initialize_tools_resources_and_prompts():
     tools_resp = srv.handle_message({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert tools_resp is not None
     names = [t["name"] for t in tools_resp["result"]["tools"]]
-    assert len(names) == 10
-    assert len(TOOL_SPECIFICATIONS) == 10
+    assert len(names) == 15
+    assert len(TOOL_SPECIFICATIONS) == 15
+    assert "rosolver_import_external" in names
+    assert "rosolver_screen_candidates" in names
 
     # Resources
     res_list = srv.handle_message({"jsonrpc": "2.0", "id": 3, "method": "resources/list"})
     assert res_list is not None
     uris = [r["uri"] for r in res_list["result"]["resources"]]
+    assert len(uris) == 6
     assert "rosolver://schema/model" in uris
+    assert "rosolver://schema/adapters" in uris
     for uri in uris:
         r_read = srv.handle_message({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": uri}})
         assert r_read is not None
@@ -82,7 +86,14 @@ def test_mcp_stateless_dimensions_formulate_calibrate_and_security():
 
     cap = _call(srv, "rosolver_capabilities")
     assert cap["isError"] is False
-    assert cap["structuredContent"]["rosolver_version"] == "0.2.0"
+    sc = cap["structuredContent"]
+    assert sc["rosolver_version"] == "0.2.0"
+    assert len(sc["tools"]) == 15
+    assert set(["openfoam", "fenicsx", "hdf5"]).issubset(set(sc["external_adapters"]))
+    assert set(["markdown", "latex", "pdf"]).issubset(set(sc["report_formats"]))
+    assert "pysr_csv" in sc["symbolic_importers"]
+    assert len(sc["report_types"]) == 10
+    assert "k" in sc["si_prefixes"]
 
     # Dimensional consistency + Buckingham-Pi
     dim_ok = _call(
@@ -341,7 +352,7 @@ def test_mcp_project_lifecycle_report_and_real_stdio_subprocess(tmp_path: Path):
         line2 = json.loads(proc.stdout.readline().decode("utf-8"))
         assert line1["id"] == 1
         assert line2["id"] == 2
-        assert len(line2["result"]["tools"]) == 10
+        assert len(line2["result"]["tools"]) == 15
 
         # 2. Content-Length framed tools/call
         body = json.dumps(
@@ -376,3 +387,106 @@ def test_mcp_project_lifecycle_report_and_real_stdio_subprocess(tmp_path: Path):
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_mcp_external_adapters_pysr_screening_and_latex_report(tmp_path: Path):
+    srv = MCPServer()
+    pdir = tmp_path / "full_caps_proj"
+    init_res = _call(srv, "rosolver_project", {"action": "init", "project_dir": str(pdir), "name": "FullCaps"})
+    assert init_res["isError"] is False
+
+    # 1. OpenFOAM multi-grid GCI via rosolver_import_external
+    case_dirs = []
+    for tag, h_val, q_val in (("coarse", 0.04, 1.0016), ("med", 0.02, 1.0004), ("fine", 0.01, 1.0001)):
+        cdir = tmp_path / f"of_{tag}"
+        sdir = cdir / "postProcessing" / "lineSample" / "10"
+        sdir.mkdir(parents=True)
+        (cdir / "system").mkdir(parents=True)
+        (cdir / "system" / "controlDict").write_text("application simpleFoam;\ndeltaT 0.01;\n", encoding="utf-8")
+        (sdir / "line_T.xy").write_text(f"# x T\n0.0 {q_val}\n0.5 {q_val}\n1.0 {q_val}\n", encoding="utf-8")
+        case_dirs.append(str(cdir))
+
+    of_insp = _call(srv, "rosolver_import_external", {"adapter": "openfoam", "action": "inspect", "source": case_dirs[-1]})
+    assert of_insp["isError"] is False
+    assert "T" in of_insp["structuredContent"]["fields"]
+    assert of_insp["structuredContent"]["solver_metadata"]["application"] == "simpleFoam"
+
+    of_gci = _call(
+        srv,
+        "rosolver_import_external",
+        {
+            "adapter": "openfoam",
+            "action": "gci",
+            "sources": list(reversed(case_dirs)),
+            "spacings": [0.01, 0.02, 0.04],
+            "field": "T",
+            "reducer": "mean",
+            "formal_order": 2.0,
+            "project_dir": str(pdir),
+        },
+    )
+    assert of_gci["isError"] is False
+    assert of_gci["structuredContent"]["status"] == "Passed"
+
+    # 2. FEniCSx VTK-CSV reference error via rosolver_import_external
+    vtk_csv = tmp_path / "fenics_out.csv"
+    vtk_csv.write_text("Points:0,Points:1,Points:2,u\n0.0,0.0,0.0,0.0\n0.5,0.0,0.0,0.25\n1.0,0.0,0.0,1.0\n", encoding="utf-8")
+    fe_ref = _call(
+        srv,
+        "rosolver_import_external",
+        {
+            "adapter": "fenicsx",
+            "action": "reference_error",
+            "source": str(vtk_csv),
+            "coordinate": "x",
+            "field": "u",
+            "reference": "x**2",
+            "l2_tol": 1e-9,
+            "project_dir": str(pdir),
+        },
+    )
+    assert fe_ref["isError"] is False
+    assert fe_ref["structuredContent"]["status"] == "Passed"
+
+    # 3. PySR symbolic candidate screening + ClaimManifest export via rosolver_screen_candidates
+    pysr_csv = tmp_path / "hall_of_fame.csv"
+    pysr_csv.write_text(
+        "Complexity,Loss,Equation,Score\n"
+        "3,0.1,x0 + x1,0.1\n"
+        "5,0.0001,0.48 * x0 * x1**2,1.2\n",
+        encoding="utf-8",
+    )
+    m_vals = np.linspace(1.0, 5.0, 12)
+    v_vals = np.linspace(2.0, 6.0, 12)
+    E_vals = 0.5 * m_vals * (v_vals ** 2)
+    screen = _call(
+        srv,
+        "rosolver_screen_candidates",
+        {
+            "target": "E",
+            "dims": {"E": "J", "m": "kg", "v": "m/s"},
+            "pysr_csv": str(pysr_csv),
+            "variable_map": {"x0": "m", "x1": "v"},
+            "data": {"m": m_vals.tolist(), "v": v_vals.tolist(), "E": E_vals.tolist()},
+            "export_claim_manifest": True,
+            "register_manifest": True,
+            "project_dir": str(pdir),
+        },
+    )
+    assert screen["isError"] is False
+    s_sc = screen["structuredContent"]
+    assert s_sc["n_admissible"] == 1
+    assert s_sc["n_rejected"] == 1
+    assert s_sc["best_candidate"]["fit"]["r2"] > 0.9999
+    assert "claim_manifest" in s_sc
+    assert (pdir / "claims" / "manifest.yaml").exists()
+
+    # 4. Headless LaTeX report via rosolver_report(format="latex")
+    tex_rep = _call(
+        srv,
+        "rosolver_report",
+        {"project_dir": str(pdir), "format": "latex", "title": "Full Capabilities Report"},
+    )
+    assert tex_rep["isError"] is False
+    assert "\\documentclass" in tex_rep["structuredContent"]["latex"]
+    assert (pdir / "reports" / "final_report.tex").exists()

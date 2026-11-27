@@ -94,8 +94,15 @@ class System:
         dim: Union[str, Dimension, Mapping[str, Union[int, float, str, sp.Rational]], None] = None,
         description: str = "",
         positive: Optional[bool] = True,
+        *,
+        unit: Optional[str] = None,
     ) -> Variable:
-        parsed_dim = None if dim is None else Dimension.parse(dim)
+        if unit is not None and dim is not None:
+            raise ValueError(f"Specify either `dim` or `unit` for variable '{name}', not both.")
+        if unit is not None:
+            parsed_dim: Optional[Dimension] = Dimension.from_unit(unit)
+        else:
+            parsed_dim = None if dim is None else self._parse_system_dim(name, dim)
         v = Variable(name=name, dim=parsed_dim, role="variable", description=description, positive=positive)
         self.variables[name] = v
         return v
@@ -106,11 +113,35 @@ class System:
         dim: Union[str, Dimension, Mapping[str, Union[int, float, str, sp.Rational]], None] = None,
         description: str = "",
         positive: Optional[bool] = True,
+        *,
+        unit: Optional[str] = None,
     ) -> Variable:
-        parsed_dim = None if dim is None else Dimension.parse(dim)
+        if unit is not None and dim is not None:
+            raise ValueError(f"Specify either `dim` or `unit` for constant '{name}', not both.")
+        if unit is not None:
+            parsed_dim: Optional[Dimension] = Dimension.from_unit(unit)
+        else:
+            parsed_dim = None if dim is None else self._parse_system_dim(name, dim)
         v = Variable(name=name, dim=parsed_dim, role="constant", description=description, positive=positive)
         self.variables[name] = v
         return v
+
+    def _parse_system_dim(
+        self,
+        name: str,
+        dim: Union[str, Dimension, Mapping[str, Union[int, float, str, sp.Rational]]],
+    ) -> Dimension:
+        import warnings
+
+        if isinstance(dim, str) and dim.strip() in ("J", "N"):
+            warnings.warn(
+                f"Ambiguous dimension string '{dim.strip()}' on '{name}': in base-dimension mode "
+                f"'J' denotes luminous intensity (cd) and 'N' denotes amount of substance (mol). "
+                f"Pass unit='{dim.strip()}' (or 'Joule'/'Newton') if you meant the SI derived unit.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return Dimension.parse(dim)
 
     def _ensure_registered(self, name: str, default_role: str = "variable") -> Variable:
         if name not in self.variables:

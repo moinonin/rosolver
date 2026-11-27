@@ -44,6 +44,9 @@ pdf = [
 mcp = [
     "mcp>=1.0",
 ]
+pysr = [
+    "pysr>=0.18",
+]
 
 [project.scripts]
 rosolver = "rosolver.cli:main"

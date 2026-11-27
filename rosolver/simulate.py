@@ -17,10 +17,13 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import numpy as np
 import sympy as sp
 
+from ._parsing import parse_expr, real_symbol
+from .model import Model as SpecModel
 from .numerical import FitResult, HybridODESolution, NumericalSolver
 from .symbolic import CandidateEquation, DerivationResult
 
-Model = Union[DerivationResult, CandidateEquation, FitResult, sp.Eq, sp.Expr]
+SimulatableModel = Union[DerivationResult, CandidateEquation, FitResult, SpecModel, sp.Eq, sp.Expr]
+Model = SimulatableModel  # Backwards-compatible internal alias
 
 
 @dataclass
@@ -46,7 +49,23 @@ class SimulationResult:
         return out
 
 
-def _resolve(model: Model, candidate: Optional[str]) -> Tuple[str, str, sp.Expr, List[sp.Symbol]]:
+def _resolve(model: SimulatableModel, candidate: Optional[str]) -> Tuple[str, str, sp.Expr, List[sp.Symbol]]:
+    if isinstance(model, SpecModel):
+        alg = [e for e in model.equations if e.type in ("algebraic", "constitutive") and e.expression]
+        if not alg:
+            raise ValueError(f"Model '{model.name}' has no algebraic/constitutive equation for parametric sweep.")
+        expr_txt = alg[0].expression
+        if "=" in expr_txt:
+            lhs_t, rhs_t = expr_txt.split("=", 1)
+            rhs_e = parse_expr(rhs_t.strip())
+            y_nm = lhs_t.strip()
+        else:
+            rhs_e = parse_expr(expr_txt.strip())
+            y_nm = model.dependent_variables[0].symbol or model.dependent_variables[0].name if model.dependent_variables else "y"
+        p_fixed = {real_symbol(k): sp.Float(float(v)) for k, v in model.parameter_values().items() if isinstance(v, (int, float))}
+        rhs_sub = rhs_e.xreplace(p_fixed)
+        free_u = [real_symbol(p.symbol or p.name) for p in model.parameters if p.status == "unknown"]
+        return model.name, y_nm, rhs_sub, free_u
     if isinstance(model, DerivationResult):
         cands = {c.name: c for c in model.candidates}
         if candidate is not None and candidate not in cands:
@@ -191,11 +210,21 @@ def plot_ranked(
     plt = _pyplot()
     x = np.asarray(data[x_name], dtype=float)
     y = np.asarray(data[y_name], dtype=float)
-    order = np.argsort(x)
+    finite_xy = np.isfinite(x) & np.isfinite(y)
     fig, ax = plt.subplots(figsize=(7.4, 4.6))
-    ax.scatter(x, y, s=22, color="black", alpha=0.7, zorder=3, label="data")
+    ax.scatter(x[finite_xy], y[finite_xy], s=22, color="black", alpha=0.7, zorder=3, label="data")
     for i, fr in enumerate(ranked):
-        ax.plot(x[order], np.asarray(fr.predictions)[order], lw=2.2 if i == 0 else 1.2,
+        preds = np.asarray(fr.predictions, dtype=float)
+        if preds.size == x.size:
+            valid = finite_xy & np.isfinite(preds)
+            xp, yp = x[valid], preds[valid]
+        elif preds.size == int(np.count_nonzero(finite_xy)):
+            xp, yp = x[finite_xy], preds
+        else:
+            n_min = min(x.size, preds.size)
+            xp, yp = x[:n_min], preds[:n_min]
+        ord_i = np.argsort(xp)
+        ax.plot(xp[ord_i], yp[ord_i], lw=2.2 if i == 0 else 1.2,
                 label=f"#{i + 1} {fr.candidate_name} (R²={fr.r2:.4f}, BIC={fr.bic:.0f})")
     if logx:
         ax.set_xscale("log")
@@ -292,11 +321,13 @@ def plot_gci_study(
     hs = np.array(report.spacings, dtype=float)
     phis = np.array(report.values, dtype=float)
     ax.plot(hs, phis, "o-", lw=2, color="tab:blue", label="Mesh / step evaluations")
-    ax.axhline(report.extrapolated_value, color="tab:green", ls="--", lw=1.6,
-               label=f"Richardson φ_ext = {report.extrapolated_value:.6g} (p={report.observed_order:.2f})")
-    band = abs(report.values[0]) * report.gci_fine_21
-    ax.axhspan(report.values[0] - band, report.values[0] + band, color="tab:green", alpha=0.15,
-               label=f"±GCI_fine ({report.gci_fine_21 * 100:.3f}%)")
+    if np.isfinite(report.extrapolated_value):
+        ax.axhline(report.extrapolated_value, color="tab:green", ls="--", lw=1.6,
+                   label=f"Richardson φ_ext = {report.extrapolated_value:.6g} (p={report.observed_order:.2f})")
+    if np.isfinite(report.gci_fine_21):
+        band = abs(report.values[0]) * report.gci_fine_21
+        ax.axhspan(report.values[0] - band, report.values[0] + band, color="tab:green", alpha=0.15,
+                   label=f"±GCI_fine ({report.gci_fine_21 * 100:.3f}%)")
     ax.set_xlabel("Discretisation size h (or dt)")
     ax.set_ylabel(qoi_label)
     ax.set_title(f"Grid / Step Independence [{report.regime}]")

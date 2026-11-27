@@ -57,6 +57,7 @@ WORKFLOW_COMMANDS = frozenset(
         "report",
         "info",
         "mcp",
+        "claim",
     }
 )
 
@@ -133,15 +134,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _load_csv_columns(path: Path) -> Dict[str, np.ndarray]:
-    cols: Dict[str, List[float]] = {}
-    with path.open("r", newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            for k, v in row.items():
-                if k is None or v is None:
-                    continue
-                cols.setdefault(k.strip(), []).append(float(v))
-    return {k: np.asarray(vals, dtype=float) for k, vals in cols.items()}
+    from .data import load_tabular_csv
+
+    raw = load_tabular_csv(path, missing_policy="raise", allow_string_columns=True)
+    return {k: v for k, v in raw.items() if isinstance(v, np.ndarray)}
 
 
 def _build_workflow_parser() -> argparse.ArgumentParser:
@@ -247,9 +243,9 @@ def _build_workflow_parser() -> argparse.ArgumentParser:
     p_vr.add_argument("--json", action="store_true", help="Emit structured JSON output.")
 
     # report
-    p_rep = subs.add_parser("report", help="Generate reproducible scientific Markdown/JSON/YAML report.")
+    p_rep = subs.add_parser("report", help="Generate reproducible scientific Markdown/JSON/YAML/LaTeX/PDF report.")
     p_rep.add_argument("project", help="Project directory.")
-    p_rep.add_argument("--output", default="reports/final_report.md", help="Report output path.")
+    p_rep.add_argument("--output", default="reports/final_report.md", help="Report output path (.md, .json, .yaml, .tex, or .pdf).")
     p_rep.add_argument("--title", default=None, help="Report title.")
     p_rep.add_argument("--type", dest="report_type", default="integrated_project", help="Report type.")
     p_rep.add_argument("--description", default="", help="Report description.")
@@ -266,6 +262,32 @@ def _build_workflow_parser() -> argparse.ArgumentParser:
     # mcp
     p_mcp = subs.add_parser("mcp", help="Start the Rosolver Model Context Protocol (MCP) server over stdio.")
     p_mcp.add_argument("--list-tools", action="store_true", help="Print registered MCP tool schemas as JSON and exit.")
+
+    # claim (Sprint 10: init, audit, questions, respond)
+    p_claim = subs.add_parser("claim", help="Deterministic scientific claim verification and peer-review rebuttal workflow.")
+    claim_subs = p_claim.add_subparsers(dest="claim_action", required=True)
+
+    pc_init = claim_subs.add_parser("init", help="Register a ClaimManifest YAML/JSON file into a project.")
+    pc_init.add_argument("project", help="Project directory.")
+    pc_init.add_argument("--manifest", required=True, help="Path to ClaimManifest YAML/JSON file.")
+    pc_init.add_argument("--json", action="store_true", help="Emit JSON output.")
+
+    pc_audit = claim_subs.add_parser("audit", help="Run a deterministic claim-verification audit round.")
+    pc_audit.add_argument("project", help="Project directory.")
+    pc_audit.add_argument("--manifest", default=None, help="Optional ClaimManifest path to register before auditing.")
+    pc_audit.add_argument("--output", default=None, help="Optional referee report output path (e.g. reports/referee_r1.md).")
+    pc_audit.add_argument("--json", action="store_true", help="Emit JSON output.")
+
+    pc_q = claim_subs.add_parser("questions", help="List open deterministic referee clarification requests.")
+    pc_q.add_argument("project", help="Project directory.")
+    pc_q.add_argument("--severity", choices=["all", "major"], default="all", help="Filter by severity.")
+    pc_q.add_argument("--json", action="store_true", help="Emit JSON output.")
+
+    pc_resp = claim_subs.add_parser("respond", help="Submit author rebuttal YAML/JSON and re-verify in Round k+1.")
+    pc_resp.add_argument("project", help="Project directory.")
+    pc_resp.add_argument("--rebuttal", required=True, help="Path to RebuttalSubmission YAML/JSON file.")
+    pc_resp.add_argument("--output", default=None, help="Optional Round k+1 referee report output path.")
+    pc_resp.add_argument("--json", action="store_true", help="Emit JSON output.")
 
     return p
 
@@ -311,7 +333,7 @@ def _load_sim_dataset_from_run(proj: Project, run_id: Optional[str], field: str,
         target_rec = proj.get_run(run_id)
     else:
         for r in reversed(runs):
-            if r.type in ("pde_simulation", "ode_simulation", "simulation"):
+            if r.type in ("pde_simulation", "ode_simulation", "stefan_simulation", "simulation"):
                 target_rec = r
                 break
     if target_rec is None:
@@ -347,6 +369,15 @@ def _load_sim_dataset_from_run(proj: Project, run_id: Optional[str], field: str,
             units={c_name: meta_units.get(c_name, "s"), field: meta_units.get(field, "1")},
             provenance={"run_id": target_rec.id},
         )
+    if "t" in raw and field in ("delta", "T_s", "film", "mdot_ice", "mdot_out") and raw.get(field) is not None:
+        c_name = coord or "t"
+        return Dataset(
+            name=f"{target_rec.id}_{field}",
+            coordinates={c_name: np.asarray(raw["t"], dtype=float)},
+            fields={field: np.asarray(raw[field], dtype=float)},
+            units={c_name: meta_units.get(c_name, "s"), field: meta_units.get(field, "m" if field in ("delta", "film") else "1")},
+            provenance={"run_id": target_rec.id},
+        )
     raise ProjectError(f"Could not extract field '{field}' from run '{target_rec.id}'.")
 
 
@@ -377,14 +408,24 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
         if args.command == "validate":
             target = Path(args.project)
             if target.is_file():
-                model = Model.from_file(target)
-                errs = model.validate(strict=False)
-                valid = len(errs) == 0
-                payload = {"status": "valid" if valid else "invalid", "model": model.name, "errors": errs}
+                try:
+                    model = Model.from_file(target)
+                    errs = model.validate(strict=False)
+                    if args.strict and not model.equations and not model.dependencies:
+                        errs.append("Strict mode: model declares neither equations nor dependencies.")
+                    valid = len(errs) == 0
+                    m_name = model.name
+                    m_ver = model.version
+                except ModelValidationError as exc:
+                    valid = False
+                    errs = [s.strip() for s in str(exc).split(";") if s.strip()]
+                    m_name = target.stem
+                    m_ver = "unknown"
+                payload = {"status": "valid" if valid else "invalid", "model": m_name, "errors": errs}
                 human = (
-                    f"Model '{model.name}' (v{model.version}): VALID"
+                    f"Model '{m_name}' (v{m_ver}): VALID"
                     if valid
-                    else f"Model '{model.name}': INVALID - {'; '.join(errs)}"
+                    else f"Model '{m_name}': INVALID - {'; '.join(errs)}"
                 )
                 _emit(payload, human, as_json)
                 return EXIT_OK if valid else EXIT_VALIDATION_ERROR
@@ -396,10 +437,15 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
                 try:
                     m = proj.get_model(name=mref.name, version=mref.version, verify_hash=False)
                     errs = m.validate(strict=False)
+                    if args.strict and not m.equations and not m.dependencies:
+                        errs.append("Strict mode: model declares neither equations nor dependencies.")
                     if errs:
                         model_errors[mref.name] = errs
                 except Exception as exc:
                     model_errors[mref.name] = [str(exc)]
+            strict_fail = bool(args.strict and not proj.models)
+            if strict_fail:
+                model_errors["__project__"] = ["Strict mode: project has zero registered models."]
             ok = bool(integrity["ok"]) and not model_errors
             payload = {
                 "status": "valid" if ok else "invalid",
@@ -711,6 +757,77 @@ def _run_workflow_cli(argv: Sequence[str]) -> int:
             from .mcp.server import main as mcp_main
 
             return mcp_main(["--list-tools"] if args.list_tools else [])
+
+        if args.command == "claim":
+            from .claims import ClaimAuditEngine, ClaimManifest, ClaimVerdictKind, RebuttalSubmission
+            from .reporting import ReportGenerator
+
+            proj = Project.open(args.project)
+            if args.claim_action == "init":
+                manifest = ClaimManifest.from_file(args.manifest)
+                dest = proj.register_claim_manifest(manifest)
+                payload = {
+                    "action": "claim_init",
+                    "study_title": manifest.study_title,
+                    "n_claims": len(manifest.claims),
+                    "manifest_hash": manifest.content_hash(),
+                    "path": dest.relative_to(proj.root).as_posix(),
+                }
+                _emit(payload, f"Registered ClaimManifest '{manifest.study_title}' ({len(manifest.claims)} claims).", as_json)
+                return EXIT_OK
+
+            if args.claim_action == "audit":
+                manifest = ClaimManifest.from_file(args.manifest) if args.manifest else None
+                rec = proj.audit_claims(manifest=manifest)
+                rep_out: Optional[str] = None
+                if args.output:
+                    rep = ReportGenerator.from_claim_round(proj, rec, report_type="peer_review_letter")
+                    out_p = Path(args.output)
+                    full_out = out_p if out_p.is_absolute() else (proj.root / out_p)
+                    rep.save(full_out, also_manifest=True)
+                    rep_out = full_out.relative_to(proj.root).as_posix() if full_out.is_relative_to(proj.root) else full_out.name
+                payload = {**rec.to_dict(), "report_path": rep_out}
+                lines = [f"Claim audit {rec.round_id}: counts={rec.summary_counts}, open_requests={len(rec.open_requests)}"]
+                for v in rec.verdicts:
+                    lines.append(f"  - [{v.overall_verdict.value}] {v.claim_id}: {v.title}")
+                _emit(payload, "\n".join(lines), as_json)
+                has_block = any(
+                    v.overall_verdict in (ClaimVerdictKind.FALSIFIED, ClaimVerdictKind.INCONCLUSIVE)
+                    for v in rec.verdicts
+                )
+                return EXIT_CHECK_FAILED if has_block else EXIT_OK
+
+            if args.claim_action == "questions":
+                reqs = ClaimAuditEngine.load_open_clarifications(proj)
+                if args.severity == "major":
+                    reqs = [r for r in reqs if r.severity.startswith("major")]
+                payload = {"count": len(reqs), "requests": [r.to_dict() for r in reqs]}
+                lines = [f"Open clarification requests: {len(reqs)}"]
+                for r in reqs:
+                    lines.append(f"  - [{r.request_id}] ({r.severity}) {r.claim_id}: {r.reviewer_prompt}")
+                _emit(payload, "\n".join(lines), as_json)
+                return EXIT_OK
+
+            if args.claim_action == "respond":
+                subs = RebuttalSubmission.load_list(args.rebuttal)
+                rec = proj.submit_rebuttal(subs)
+                rep_out = None
+                if args.output:
+                    rep = ReportGenerator.from_claim_round(proj, rec, report_type="peer_review_letter")
+                    out_p = Path(args.output)
+                    full_out = out_p if out_p.is_absolute() else (proj.root / out_p)
+                    rep.save(full_out, also_manifest=True)
+                    rep_out = full_out.relative_to(proj.root).as_posix() if full_out.is_relative_to(proj.root) else full_out.name
+                payload = {**rec.to_dict(), "report_path": rep_out}
+                lines = [f"Rebuttal round {rec.round_id}: counts={rec.summary_counts}"]
+                for tr in rec.transitions:
+                    lines.append(f"  - {tr.claim_id}: {tr.prev_verdict} -> {tr.new_verdict}")
+                _emit(payload, "\n".join(lines), as_json)
+                has_block = any(
+                    v.overall_verdict in (ClaimVerdictKind.FALSIFIED, ClaimVerdictKind.INCONCLUSIVE)
+                    for v in rec.verdicts
+                )
+                return EXIT_CHECK_FAILED if has_block else EXIT_OK
 
     except (FileNotFoundError, ProjectError, ProvenanceMismatchError, ModelValidationError) as exc:
         err_payload = {"error": type(exc).__name__, "message": str(exc), "exit_code": EXIT_VALIDATION_ERROR}

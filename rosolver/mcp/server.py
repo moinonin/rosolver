@@ -28,12 +28,15 @@ from .tools import (
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-03-26", "2024-11-05")
 DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+_MAX_MCP_MESSAGE_BYTES = 16 * 1024 * 1024  # 16 MiB cap against Content-Length DoS
 
 SERVER_INSTRUCTIONS = (
-    "Rosolver MCP evaluates scientific equations, dimensions, calibrations, ODE/PDE/Stefan "
-    "simulations, MMS/GCI/conservation verifications, experimental validations, and reports. "
+    "Rosolver MCP evaluates scientific equations, dimensions, SI unit conversions, calibrations, "
+    "ODE/PDE/Stefan simulations, MMS/GCI/conservation verifications, external CFD/FEM/HDF5 "
+    "solver imports (OpenFOAM, FEniCSx, HDF5), PySR symbolic-regression candidate screening, "
+    "experimental validations, scientific claim audits with R1->R2 rebuttals, and Markdown/LaTeX/PDF reports. "
     "AI proposes; Rosolver deterministically evaluates. Always surface Failed, Inconclusive, "
-    "or Warning statuses verbatim and never claim formal regulatory certification."
+    "Falsified, SchemeDependent, or Warning statuses verbatim and never claim formal regulatory certification."
 )
 
 
@@ -190,14 +193,33 @@ def _read_message(stream: BinaryIO) -> Tuple[Optional[bytes], bool]:
         if not stripped:
             continue
         if stripped.lower().startswith(b"content-length:"):
-            length = int(stripped.split(b":", 1)[1].strip())
+            raw_len = stripped.split(b":", 1)[1].strip()
+            try:
+                length = int(raw_len)
+            except ValueError as exc:
+                raise ValueError(f"Malformed Content-Length header: {raw_len!r}") from exc
+            if length < 0 or length > _MAX_MCP_MESSAGE_BYTES:
+                raise ValueError(
+                    f"Content-Length {length} out of allowed bounds [0, {_MAX_MCP_MESSAGE_BYTES}]."
+                )
             # Consume remaining headers until blank line
             while True:
                 hdr = stream.readline()
                 if not hdr or hdr in (b"\r\n", b"\n"):
                     break
-            body = stream.read(length)
-            return body, True
+            chunks = []
+            remaining = length
+            while remaining > 0:
+                chunk = stream.read(remaining)
+                if not chunk:
+                    raise EOFError(
+                        f"Unexpected EOF while reading framed MCP body ({length - remaining}/{length} bytes)."
+                    )
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            return b"".join(chunks), True
+        if len(stripped) > _MAX_MCP_MESSAGE_BYTES:
+            raise ValueError(f"JSON-RPC line exceeds maximum size ({_MAX_MCP_MESSAGE_BYTES} bytes).")
         return stripped, False
 
 
@@ -218,7 +240,12 @@ def serve_stdio(stdin: Optional[BinaryIO] = None, stdout: Optional[BinaryIO] = N
     server = MCPServer()
 
     while True:
-        raw, framed = _read_message(in_stream)
+        try:
+            raw, framed = _read_message(in_stream)
+        except Exception as exc:
+            err = server._error(None, -32600, f"Transport framing error: {exc}")
+            _write_message(out_stream, err, True)
+            return 1
         if raw is None:
             return 0
         try:

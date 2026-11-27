@@ -1,0 +1,453 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.1cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array,tabularx}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+% Academic color palette (consistent with rosolver technical notes)
+\definecolor{navy}{HTML}{1B365D}
+\definecolor{slate}{HTML}{2C5282}
+\definecolor{tint}{HTML}{F4F7FA}
+\definecolor{amber}{HTML}{8A5A00}
+\definecolor{ambertint}{HTML}{FFFBEB}
+\definecolor{greenink}{HTML}{1E5631}
+\definecolor{greentint}{HTML}{F1F8F4}
+\definecolor{crimson}{HTML}{9B2C2C}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=slate,
+  urlcolor=slate,
+  citecolor=slate,
+  pdftitle={Formulating Human Average Lifespan as a Function of Heart Rate via Chain-Rule Dimensional Closure and Hemodynamic Survival Mechanics},
+  pdfauthor={rosolver Scientific Study}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{slate}\textsc{Cardiovascular Hemodynamics \& Lifespan Formulation (\texttt{rosolver})}}
+\fancyhead[R]{\small\color{slate}Chain Rule $\cdot$ Buckingham-$\Pi$ $\cdot$ Coupled ODE V\&V}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newtcolorbox{setupbox}[1]{
+  breakable, enhanced, colback=tint, colframe=navy, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+\newtcolorbox{insightbox}[1]{
+  breakable, enhanced, colback=ambertint, colframe=amber, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+\newtcolorbox{resultbox}[1]{
+  breakable, enhanced, colback=greentint, colframe=greenink, boxrule=0.8pt, arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt, fonttitle=\bfseries\color{white}, title={#1}
+}
+
+\tikzset{
+  varnode/.style={circle, draw=navy, fill=tint, thick, minimum size=9.0mm, font=\small\bfseries},
+  paramnode/.style={rectangle, rounded corners=3pt, draw=amber, fill=ambertint, thick, minimum height=7mm, inner sep=4pt, font=\small},
+  targetnode/.style={circle, draw=greenink, fill=greentint, very thick, minimum size=10.0mm, font=\small\bfseries},
+  dep/.style={-{Stealth[length=2.5mm]}, thick, color=navy},
+  paramdep/.style={-{Stealth[length=2.2mm]}, dashed, thick, color=amber}
+}
+
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\pd}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\td}[2]{\frac{\dd #1}{\dd #2}}
+\newcommand{\dimbr}[1]{\left[#1\right]}
+\newcommand{\Lbar}{\bar{\mathcal{L}}}
+\newcommand{\Deff}{D_{\mathrm{eff}}}
+\newcommand{\St}{\mathrm{St}}
+
+\title{
+  {\color{navy}\rule{\textwidth}{1.8pt}}\\[0.6em]
+  {\LARGE\bfseries\color{navy} Mathematical Formulation of Human Average Lifespan as a Function of Heart Rate}\\[0.35em]
+  {\large\color{slate} Chain-Rule Dimensional Closure, Vascular Network Reduction, Buckingham-$\Pi$ Strouhal Scaling \& Coupled Survival Simulation}\\[0.4em]
+  {\color{navy}\rule{\textwidth}{0.8pt}}
+}
+\author{Technical Study \& Lecture Notes\\[2pt]{\small\texttt{python -m examples.cardiovascular\_lifespan\_study.run\_study}}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Given only the qualitative physiological facts that human heart rate $H$ depends on age $a$, arterial blood flow velocity $v$, and artery diameters $\{D_k\}_{k=1}^m$—where age, velocity, and diameters are all functions of time $t$—how can human \emph{average lifespan} $\Lbar$ be expressed mathematically as a function of heart rate? Applying the generalized \texttt{ch1.tex} / \texttt{rosolver} methodology (Dependency DAG $\to$ Multivariate Chain Rule $\to$ Rational Dimensional Matrix Closure $\to$ Clairaut Exactness $\to$ Buckingham-$\Pi$ Nullspace Extraction $\to$ Dynamical Survival Integration), we show that the problem admits a unified three-tier mathematical solution. First, plural arterial diameters $\{D_k(t)\}$ collapse via Murray/Poiseuille hydraulic equivalence into an effective caliber $\Deff(t)$, and dimensional analysis of $\{a, v, \Deff\}$ ($\mathrm{rank}=2$, $\mathrm{nullity}=1$) extracts the exact dimensionless convective ratio $\Pi_1 = a v / \Deff$, yielding the hemodynamic heart-rate law $H(t) = H_{\mathrm{base}} + \kappa_{\mathrm{mat}}/a(t) + \kappa_{\mathrm{hemo}}\,v(t)/\Deff(t)$. Second, dimensional inversion for lifespan $\Lbar = \Psi(H, v, \Deff)$ automatically discovers the \textbf{Arterial Strouhal Number} $\St = H\Deff/v$, proving why inter-species mammalian allometry obeys $\Lbar \propto H^{-1}$ ($\St \approx \text{const}$) while intra-species human cohorts require a non-zero senescence baseline $\mathcal{L}_0 + \kappa_{\mathcal{L}} H^{\nu_1 - 1}(\Deff/v)^{\nu_1}$ ($R^2 = 0.9703$, beating unmodulated $1/H$ by $\Delta\mathrm{BIC} = -31.95$). Third, embedding $H(a(t),v(t),\Deff(t))$ inside a 7-state Gompertz--Makeham--Cox ODE system yields both an exact Exponential-Integral ($E_1$) analytical formula and numerically verified lifespan trajectories ($\mathrm{RK4}$ observed order $p = 3.982$, conservation drift $1.55\times 10^{-15}$, clinical validation $\mathrm{RMSE} = 0.386\text{ yr}$).
+\end{abstract}
+
+\tableofcontents
+\vspace{0.8em}
+\hrule
+\vspace{1em}
+
+% ============================================================================
+\section{Problem Statement \& Dependency Graph Architecture}
+% ============================================================================
+
+\begin{setupbox}{Problem Specification}
+\textbf{Qualitative Premises}:
+\begin{enumerate}[leftmargin=1.5em,itemsep=2pt]
+  \item Human heart rate $H$ is a function of chronological/biological age $a$, arterial blood flow velocity $v$, and plural artery diameters $\mathbf{D} = (D_1, D_2, \dots, D_m)$:
+  \begin{equation}
+    H = f\bigl(a,\, v,\, D_1, \dots, D_m\bigr).
+  \end{equation}
+  \item Age, blood flow velocity, and artery diameters are all functions of time $t$:
+  \begin{equation}
+    a = g_1(t), \qquad v = g_2(t), \qquad D_k = h_k(t) \quad (k = 1,\dots,m).
+  \end{equation}
+\end{enumerate}
+\textbf{Objective}: Construct rigorous mathematical expressions for \textbf{human average lifespan} $\Lbar$ as a function of heart rate $H$, reconcile time-varying hemodynamics with population mortality expectations, and verify numerically.
+\end{setupbox}
+
+\subsection{Why Simple Algebraic Inversion Fails Without Closure}
+A naive attempt to ``invert $H = f(a, v, \mathbf{D})$ for $a$'' encounters three immediate mathematical obstacles:
+\begin{enumerate}[leftmargin=1.5em,itemsep=2pt]
+  \item \textbf{Underdetermined Multivariate Map}: $f: \mathbb{R}_+^{m+2} \to \mathbb{R}_+$ maps $m+2$ time-varying quantities into a single scalar $H(t)$; $f^{-1}(H)$ is a codimension-1 hypersurface, not a unique age $a$, unless $(v(t), \mathbf{D}(t))$ are closed along trajectories or grouped into dimensionless invariants.
+  \item \textbf{Non-Monotonic Time Trajectory}: Resting human heart rate $H(t)$ falls sharply from infancy ($\sim 135\text{ bpm}$) to young adulthood ($\sim 60\text{--}65\text{ bpm}$) and can drift upward in late stenotic aging, violating global injectivity on $[0, \mathcal{L}]$.
+  \item \textbf{Expectation Operator}: \emph{Average lifespan} $\Lbar = \mathbb{E}[T_{\mathrm{death}}]$ is an ensemble survival functional of the trajectory $H(\cdot)$, reducing to an algebraic function $\Lbar(H_0)$ or $\Lbar(\bar{H})$ only through integral mean-value or hazard closure.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=1.15cm and 2.1cm]
+  \node[varnode] (t) {$t$};
+  \node[varnode, above right=0.85cm and 2.2cm of t] (a) {$a(t)$};
+  \node[varnode, right=2.2cm of t] (v) {$v(t)$};
+  \node[varnode, below right=0.85cm and 2.2cm of t] (Dk) {$\{D_k(t)\}$};
+  \node[varnode, right=1.8cm of Dk] (Deff) {$\Deff(t)$};
+  \node[targetnode, right=4.4cm of v] (H) {$H(t)$};
+  \node[paramnode, above=0.55cm of v] (cv) {$c_v, k_v$};
+  \node[paramnode, below=0.45cm of Deff] (cD) {$c_D, k_D$};
+  \node[targetnode, right=2.1cm of H] (Lbar) {$\Lbar(H)$};
+  \node[paramnode, above=0.55cm of Lbar] (gomp) {$\mathcal{L}_0,\, \alpha_G,\, \gamma_G$};
+
+  \draw[dep] (t) -- (a);
+  \draw[dep] (t) -- (v);
+  \draw[dep] (t) -- (Dk);
+  \draw[dep] (Dk) -- node[above,font=\scriptsize]{Murray/Pois.} (Deff);
+  \draw[dep] (Deff) -- (v);
+  \draw[dep] (a) -- (H);
+  \draw[dep] (v) -- (H);
+  \draw[dep] (Deff) -- (H);
+  \draw[dep] (H) -- node[above,font=\scriptsize]{$\Pi_{\St},\, S(t)$} (Lbar);
+  \draw[dep, bend right=18] (Deff) to (Lbar);
+  \draw[dep, bend left=18] (v) to (Lbar);
+  \draw[paramdep] (cv) -- (v);
+  \draw[paramdep] (cD) -- (Deff);
+  \draw[paramdep] (gomp) -- (Lbar);
+\end{tikzpicture}
+\caption{Directed Acyclic Graph (DAG) of the coupled time-dependent cardiovascular system and downstream lifespan mapping $\Lbar(H)$.}
+\label{fig:dag}
+\end{figure}
+
+% ============================================================================
+\section{Step 1: Plural Vascular Network Reduction $\{D_k(t)\} \mapsto \Deff(t)$}
+% ============================================================================
+
+Because the problem specifies \emph{artery diameters} in the plural, consider an arterial tree with $m$ parallel vessels at a generational cross-section having time-varying lumen diameters $\mathbf{D}(t) = \bigl(D_1(t), \dots, D_m(t)\bigr)$, each with physical dimension $\dimbr{D_k} = \mathsf{L}$. Three canonical power-mean hydraulic invariants reduce $\mathbf{D}(t)$ to a single effective arterial diameter $\Deff(t)$ of dimension $\mathsf{L}$:
+\begin{equation}
+  D_q(t) = \left(\sum_{k=1}^m w_k\, D_k(t)^q\right)^{1/q}, \qquad \dimbr{D_q} = \mathsf{L},
+  \label{eq:power_mean_diam}
+\end{equation}
+where:
+\begin{itemize}[leftmargin=1.5em,itemsep=2pt]
+  \item $q = 2$ (\textbf{Continuity / Cross-Sectional Area Equivalence}): $A_{\mathrm{tot}}(t) = \frac{\pi}{4} D_2(t)^2 = \frac{\pi}{4}\sum_{k=1}^m D_k(t)^2$, governing bulk volumetric cardiac output $Q(t) = A_{\mathrm{tot}}(t)\,v(t)$.
+  \item $q = 3$ (\textbf{Murray's Minimum-Work Cube Law}): $D_3(t)^3 = \sum_{k=1}^m D_k(t)^3$, preserving endothelial wall shear stress $\tau_w \propto Q / D^3$ across vascular bifurcations.
+  \item $q = 4$ (\textbf{Hagen--Poiseuille Hydraulic Conductance Equivalence}): $D_4(t)^4 = \sum_{k=1}^m D_k(t)^4$, governing viscous vascular resistance $R_{\mathrm{vasc}}(t) = \frac{128\mu \ell}{\pi D_4(t)^4}$.
+\end{itemize}
+Differentiating Eq.~\eqref{eq:power_mean_diam} with respect to $t$ yields the exact chain-rule aggregation of individual vessel remodeling/stenosis rates $\dot{D}_k(t)$:
+\begin{equation}
+  \td{\Deff}{t} = \sum_{k=1}^m \left(\frac{w_k D_k(t)^{q-1}}{\Deff(t)^{q-1}}\right)\td{D_k}{t}.
+  \label{eq:deff_rate}
+\end{equation}
+In our numerical benchmark (\texttt{murray\_poiseuille\_network\_demo}), a $15\%\text{--}24\%$ atherosclerotic lumen narrowing across major systemic branches reduces $D_4$ from $20.06\text{ mm}$ to $16.93\text{ mm}$, nearly \textbf{doubling} viscous peripheral resistance ($(D_{4,\mathrm{young}}/D_{4,\mathrm{aged}})^4 = 1.973$).
+
+% ============================================================================
+\section{Step 2: Forward Formulation of $H\bigl(a(t), v(t), \Deff(t)\bigr)$}
+% ============================================================================
+
+\subsection{Multivariate Chain Rule \& Dimensional Regression (\texttt{ch1.tex} Method)}
+Applying the multivariate chain rule to $H = f(a, v, \Deff)$ along time $t$:
+\begin{equation}
+  \td{H}{t} = \pd{H}{a}\td{a}{t} + \pd{H}{v}\td{v}{t} + \pd{H}{\Deff}\td{\Deff}{t}.
+  \label{eq:chain_H}
+\end{equation}
+Using fundamental base dimensions $\{\mathsf{L}, \mathsf{T}\}$ (treating cardiac cycles/beats as dimensionless phase counts), the variables carry dimensions:
+\[
+  \dimbr{H} = \mathsf{T}^{-1}, \qquad \dimbr{a} = \mathsf{T}, \qquad \dimbr{v} = \mathsf{L}\mathsf{T}^{-1}, \qquad \dimbr{\Deff} = \mathsf{L}, \qquad \dimbr{t} = \mathsf{T}.
+\]
+Rewriting Eq.~\eqref{eq:chain_H} in the dimensional linear-regression form of \texttt{ch1.tex} (Eq.~2.9):
+\begin{equation}
+  \frac{1}{\mathsf{T}^2} = \beta_0 + \beta_a\,(1) + \beta_v\left(\frac{\mathsf{L}}{\mathsf{T}^2}\right) + \beta_D\left(\frac{\mathsf{L}}{\mathsf{T}}\right),
+\end{equation}
+which fixes the required dimensions of all three partial-derivative sensitivities:
+\begin{equation}
+  \dimbr{\beta_a} = \dimbr{\pd{H}{a}} = \mathsf{T}^{-2}, \qquad
+  \dimbr{\beta_v} = \dimbr{\pd{H}{v}} = \mathsf{L}^{-1}, \qquad
+  \dimbr{\beta_D} = \dimbr{\pd{H}{\Deff}} = \mathsf{L}^{-1}\mathsf{T}^{-1}.
+  \label{eq:beta_dims}
+\end{equation}
+
+\subsection{Dimensional Matrix Nullspace \& Clairaut Exactness}
+Assembling the dimension matrix $M_H$ for scope $\{a, v, \Deff\}$ over $\{\mathsf{L}, \mathsf{T}\}$:
+\begin{equation}
+  M_H = \bordermatrix{
+    & a & v & \Deff \cr
+    \mathsf{L} & 0 & 1 & 1 \cr
+    \mathsf{T} & 1 & -1 & 0
+  },
+  \qquad \mathrm{rank}(M_H) = 2, \qquad \mathrm{nullity}(M_H) = 3 - 2 = 1.
+\end{equation}
+Because $\mathrm{nullity}(M_H) = 1$, \texttt{rosolver.formulate} extracts the unique canonical coprime kernel vector $\mathbf{n}_1 = [1, 1, -1]^T$, discovering the dimensionless convective-age group:
+\begin{equation}
+  \Pi_1 = \frac{a\,v}{\Deff} = \frac{v / \Deff}{1 / a}.
+  \label{eq:pi1_forward}
+\end{equation}
+Solving Eq.~\eqref{eq:beta_dims} with \textbf{Clairaut mixed-partial symmetry} ($\pd{\beta_v}{\Deff} = \pd{\beta_D}{v}$) couples the velocity and diameter sensitivities into an exact differential:
+\begin{equation}
+  \beta_v = \frac{\kappa_{\mathrm{hemo}}}{\Deff}, \qquad
+  \beta_D = -\kappa_{\mathrm{hemo}}\frac{v}{\Deff^2}
+  \quad\Longrightarrow\quad
+  \pd{\beta_v}{\Deff} = -\frac{\kappa_{\mathrm{hemo}}}{\Deff^2} = \pd{\beta_D}{v},
+\end{equation}
+while $\beta_a = -\kappa_{\mathrm{mat}}/a^2$ closes the maturational age slot. Integrating via Poincar\'e line integration (equivalently \texttt{rosolver}'s \texttt{buckingham\_pi\_affine} closure on $H$) yields the closed-form time-dependent heart-rate law:
+\begin{equation}
+  H(t) = H_{\mathrm{base}} + \frac{\kappa_{\mathrm{mat}}}{a(t)} + \kappa_{\mathrm{hemo}}\,\frac{v(t)}{\Deff(t)}.
+  \label{eq:H_closed}
+\end{equation}
+
+\begin{insightbox}{Biophysical Interpretation of Every Term in Eq.~\eqref{eq:H_closed}}
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item $H_{\mathrm{base}}$ ($\mathsf{T}^{-1}$): Intrinsic vagally regulated sinoatrial pacemaker floor in adulthood ($\approx 47\text{ bpm}$).
+  \item $\kappa_{\mathrm{mat}}/a(t)$ ($\mathsf{T}^{-1}$): Developmental maturation decay, capturing the hyperbolic drop from neonatal heart rates ($\sim 140\text{ bpm}$ at $a \approx 1\text{ yr}$) to adult resting levels ($\sim 65\text{ bpm}$ at $a = 20\text{ yr}$).
+  \item $\kappa_{\mathrm{hemo}}\,v(t)/\Deff(t)$ ($\mathsf{T}^{-1}$): Hemodynamic convective turnover coupling. Under isometric stroke-volume scaling $V_s \propto \Deff^3$ and continuity $Q = H V_s = \frac{\pi}{4}\Deff^2 v$, one obtains $H \propto v/\Deff$ identically! Furthermore, when progressive atherosclerosis narrows $\Deff(t)$ ($\dot{D}_{\mathrm{eff}} < 0$), the chain-rule term $-\kappa_{\mathrm{hemo}}(v/\Deff^2)\dot{D}_{\mathrm{eff}} > 0$ drives compensatory late-life heart-rate elevation.
+\end{itemize}
+\end{insightbox}
+
+% ============================================================================
+\section{Step 3: Expressing Human Average Lifespan as a Function of Heart Rate}
+% ============================================================================
+
+We now invert the perspective to express \textbf{average lifespan} $\Lbar$ ($\dimbr{\Lbar} = \mathsf{T}$) in terms of heart rate $H$ ($\dimbr{H} = \mathsf{T}^{-1}$) and the underlying hemodynamic state $(v, \Deff)$.
+
+\subsection{Dimensional Closure of $\Lbar = \Psi(H, v, \Deff)$ \& Arterial Strouhal Discovery}
+Executing \texttt{rosolver.formulate} on \texttt{L\_life = fn(H, v, D)} constructs the dimension matrix:
+\begin{equation}
+  M_{\mathcal{L}} = \bordermatrix{
+    & H & v & \Deff \cr
+    \mathsf{L} & 0 & 1 & 1 \cr
+    \mathsf{T} & -1 & -1 & 0
+  },
+  \qquad \mathrm{rank}(M_{\mathcal{L}}) = 2, \qquad \mathrm{nullity}(M_{\mathcal{L}}) = 1.
+\end{equation}
+For $\dimbr{\pd{\Lbar}{H}} = \frac{\mathsf{T}}{\mathsf{T}^{-1}} = \mathsf{T}^2$, the unique minimum-complexity monomial is $\pd{\Lbar}{H} = \kappa_{\mathcal{L}}/H^2$, and the nullspace $\ker(M_{\mathcal{L}})$ yields the \textbf{Arterial Strouhal Number}:
+\begin{equation}
+  \Pi_{\St} \equiv \St = \frac{H\,\Deff}{v} \qquad (\text{pulsatile frequency } \times \text{ convective diameter transit time}).
+  \label{eq:strouhal}
+\end{equation}
+Integrating with integration baseline $\mathcal{L}_0$ produces the complete \texttt{rosolver} family of dimensionally exact lifespan laws:
+\begin{align}
+  \text{(I) Beat-Budget:}\quad
+  &\Lbar(H) = \frac{N_0}{H}, \label{eq:law_beat}\\[4pt]
+  \text{(II) $\Pi$-Power Law:}\quad
+  &\Lbar(H, v, \Deff) = \mathcal{L}_0 + \frac{N_1}{H}\!\left(\frac{H\,\Deff}{v}\right)^{\!\nu_1}
+   = \mathcal{L}_0 + N_1\,H^{\nu_1 - 1}\!\left(\frac{\Deff}{v}\right)^{\!\nu_1}, \label{eq:law_pipower}\\[4pt]
+  \text{(III) $\Pi$-Affine Law:}\quad
+  &\Lbar(H, v, \Deff) = \mathcal{L}_0 + \frac{N_1}{H} + \tau_{\mathrm{vasc}}\,\frac{\Deff}{v}. \label{eq:law_piaffine}
+\end{align}
+Moreover, substituting $v/\Deff = \bigl(H - H_{\mathrm{base}} - \kappa_{\mathrm{mat}}/\Lbar\bigr)/\kappa_{\mathrm{hemo}}$ from Eq.~\eqref{eq:H_closed} eliminates $(v, \Deff)$ when only $H$ is observed, reducing Eq.~\eqref{eq:law_piaffine} to an implicit function of $H$ alone!
+
+\subsection{Theorem: Why Intra-Species Human Lifespan Requires $\mathcal{L}_0 \neq 0$}
+A classic paradox in physiology is that across mammals (mouse to whale), $\Lbar \approx N_0 / H$ holds over 1.5 orders of magnitude ($N_0 \approx 8.7\times 10^8\text{--}1.2\times 10^9$ beats; human outlier $\approx 2.7\times 10^9$ beats), yet within adult humans, doubling resting heart rate from $48\text{ bpm}$ to $96\text{ bpm}$ reduces average lifespan from $\approx 83.1\text{ yr}$ to $\approx 74.0\text{ yr}$ ($\sim 11\%$, \emph{not} $50\%$).
+
+\begin{insightbox}{Dimensional Elasticity Sum-Rule Theorem}
+Suppose $\mathcal{L}_0 = 0$, so $\Lbar(H, v, \Deff) = H^{-1}\Phi(H\Deff/v)$ has no intrinsic species senescence time constant. Defining dimensionless elasticities $E_{\Lbar, x} \equiv \frac{x}{\Lbar}\pd{\Lbar}{x}$, Euler's homogeneous function theorem with respect to dimensions $\mathsf{T}$ and $\mathsf{L}$ enforces:
+\begin{equation}
+  E_{\Lbar, H} + E_{\Lbar, v} = -1, \qquad E_{\Lbar, \Deff} + E_{\Lbar, v} = 0
+  \quad\Longrightarrow\quad
+  E_{\Lbar, H} - E_{\Lbar, \Deff} \equiv -1.
+  \label{eq:sum_rule}
+\end{equation}
+\textbf{Consequence}: Across mammalian species of mass $M$, West--Brown--Enquist quarter-power scaling gives $H \propto M^{-1/4}$, characteristic vascular transit scale $\Deff \propto M^{1/4}$, and invariant blood velocity $v \propto M^0$, so $\St = H\Deff/v \approx \text{const}$ and $\Lbar \propto H^{-1}$. \textbf{Within adult humans}, however, empirical mortality data require $E_{\Lbar, H} \approx -0.15$. Under $\mathcal{L}_0 = 0$, Eq.~\eqref{eq:sum_rule} would force $E_{\Lbar, \Deff} = 1 + E_{\Lbar, H} \approx +0.85$, overpredicting diameter sensitivity fivefold ($R^2 = -14.71$ in \texttt{rosolver} falsification tests!). Retaining the non-zero senescence baseline $\mathcal{L}_0 > 0$ (\texttt{zero\_initials=False}) breaks the homogeneous zero-intercept lock and raises goodness-of-fit to $\mathbf{R^2 = 0.9703}$.
+\end{insightbox}
+
+\subsection{Time-Dependent Dynamical Closure: Survival Functional \& Exact $E_1$ Solution}
+Because $a(t)$, $v(t)$, and $\Deff(t)$ evolve continuously in time, population \emph{average lifespan} from adult reference age $a_{\mathrm{adult}}$ is governed rigorously by the Gompertz--Makeham--Cox survival functional driven by the time-varying trajectory $H(\tau) = f\bigl(a(\tau), v(\tau), \Deff(\tau)\bigr)$:
+\begin{align}
+  \lambda\bigl(t \mid H(\cdot)\bigr) &= \Bigl(\lambda_{\mathrm{ext}} + \alpha_G \exp\bigl[\gamma_G (a(t) - a_{\mathrm{adult}})\bigr]\Bigr) \exp\Bigl[\beta_H\bigl(H(a(t), v(t), \Deff(t)) - H_{\mathrm{ref}}\bigr)\Bigr], \label{eq:hazard}\\
+  \Lbar[H] &= a_{\mathrm{adult}} + \int_0^\infty \exp\!\left(-\int_0^t \lambda\bigl(\tau \mid H(\cdot)\bigr)\,\dd\tau\right)\dd t. \label{eq:functional_L}
+\end{align}
+In the stationary-heart-rate, pure-Gompertz limit ($\lambda_{\mathrm{ext}} \to 0$, $a(t) = a_{\mathrm{adult}} + t$, $H(t) \equiv H$), let $\tilde{\alpha}(H) = \alpha_G \exp[\beta_H(H - H_{\mathrm{ref}})]$ and $z(H) = \tilde{\alpha}(H)/\gamma_G$. Substituting $u = z e^{\gamma_G t}$ into Eq.~\eqref{eq:functional_L} yields an \textbf{exact closed-form analytical expression} in terms of the Exponential Integral $E_1(z) = \int_z^\infty u^{-1}e^{-u}\,\dd u$:
+\begin{equation}
+  \Lbar_{\mathrm{Gomp}}(H) = a_{\mathrm{adult}} + \frac{\exp\!\bigl(z(H)\bigr)}{\gamma_G}\,E_1\!\bigl(z(H)\bigr),
+  \qquad z(H) = \frac{\alpha_G}{\gamma_G}\exp\!\bigl[\beta_H(H - H_{\mathrm{ref}})\bigr].
+  \label{eq:gompertz_exact}
+\end{equation}
+Since $z(H) \approx 3\times 10^{-3} \ll 1$ for adult humans, expanding $E_1(z) = -\gamma_{\mathrm{EM}} - \ln z + \mathcal{O}(z)$ (with Euler--Mascheroni constant $\gamma_{\mathrm{EM}} \approx 0.57722$) yields the remarkably transparent quasi-linear clinical law:
+\begin{equation}
+  \Lbar(H) \simeq \underbrace{a_{\mathrm{adult}} + \frac{\ln(\gamma_G/\alpha_G) - \gamma_{\mathrm{EM}}}{\gamma_G}}_{\Lbar_{\mathrm{ref}} \,\approx\, 79.62\text{ yr at } 65\text{ bpm}} \;-\; \frac{\beta_H}{\gamma_G}\,(H - H_{\mathrm{ref}}).
+  \label{eq:gompertz_linear}
+\end{equation}
+With epidemiological Cox slope $\beta_H = 0.015\text{ bpm}^{-1}$ ($\mathrm{HR} = 1.162$ per $+10\text{ bpm}$) and human Gompertz slope $\gamma_G = 0.088\text{ yr}^{-1}$, Eq.~\eqref{eq:gompertz_linear} predicts $\pd{\Lbar}{H} = -\beta_H/\gamma_G = \mathbf{-1.705\text{ years per }+10\text{ bpm}}$!
+
+% ============================================================================
+\section{Coupled ODE Simulation, Calibration \& Visual Analysis}
+% ============================================================================
+
+The complete 7-state ODE system (\texttt{examples/cardiovascular\_lifespan\_study/model.yaml}) integrates $a(t)$, $\Deff(t)$, $v(t)$, survival $S(t)$, cumulative mortality $M(t)$, running expectancy $E_{\mathrm{rem}}(t) = \int_0^t S(\tau)\,\dd\tau$, and Miner--Palmgren biomechanical fatigue $\Omega(t)$ simultaneously in SI units over $95\text{ years}$ past age $20$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.98\textwidth]{../../figures/cardio_fig1_trajectories.png}
+  \caption{Coupled time-varying state trajectories from young adulthood ($a=20\text{ yr}$) to extreme senescence ($115\text{ yr}$) across four cardiovascular phenotypes: (a)~effective arterial lumen $\Deff(t)$, (b)~mean systemic blood velocity $v(t)$, (c)~coupled heart rate $H(a,v,\Deff)$, (d)~arterial Strouhal number $\St(t)$, (e)~cohort survival $S(t)$ with expected lifespan markers (vertical dotted lines), and (f)~Miner--Palmgren biomechanical damage accumulation $\Omega(t)$ crossing failure $\Omega=1$.}
+  \label{fig:trajectories}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Simulated Cardiovascular Phenotypes: Survival Expectation vs.\ Biomechanical Fatigue Horizon}
+\label{tab:phenotypes}
+\renewcommand{\arraystretch}{1.22}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}Xcccc@{}}
+\toprule
+\textbf{Cardiovascular Phenotype} & \textbf{$D_0$ [mm]} & \textbf{$H(20\text{ yr})$ [bpm]} & \textbf{Expected $\Lbar$ [yr]} & \textbf{Fatigue $\Omega=1$ [yr]} \\
+\midrule
+Athletic / Large Caliber & $26.0$ & $54.24$ & $\mathbf{81.47}$ & $106.36$ \\
+Normocardic Reference & $24.0$ & $64.97$ & $\mathbf{79.53}$ & $91.53$ \\
+Elevated Sympathetic Tone & $23.0$ & $80.45$ & $\mathbf{76.86}$ & $78.93$ \\
+Stenotic + Tachycardic & $21.5$ & $91.76$ & $\mathbf{74.58}$ & $70.50$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.98\textwidth]{../../figures/cardio_fig2_lifespan_vs_hr.png}
+  \caption{(a)~Human average lifespan $\Lbar(H)$ across resting heart rates $44\text{--}104\text{ bpm}$, comparing coupled ODE vascular envelopes, analytical Gompertz $E_1$ law, \texttt{rosolver}-calibrated Buckingham-$\Pi$ Strouhal power law, clinical cohort strata ($\pm 95\%$ CI), and the unmodulated $N_0/H$ curve. (b)~Log--log reconciliation of cross-mammalian $H^{-1}$ allometry ($\St \approx \text{const}$) with the shallow human intra-species trajectory.}
+  \label{fig:lifespan_vs_hr}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.98\textwidth]{../../figures/cardio_fig3_surface_sensitivity.png}
+  \caption{(a)~Two-dimensional coupled lifespan phase surface $\Lbar(H_0, D_0)$ showing joint sensitivity to intrinsic heart rate and young-adult arterial caliber. (b)~Exact chain-rule decomposition of $\dd H/\dd t$ into autonomic maturation $(\pd{H}{a})\dot{a} < 0$, velocity relaxation $(\pd{H}{v})\dot{v} < 0$, and atherosclerotic narrowing $(\pd{H}{\Deff})\dot{D}_{\mathrm{eff}} > 0$.}
+  \label{fig:surface_sens}
+\end{figure}
+
+% ============================================================================
+\section{Empirical Model Selection \& ASME V\&V 20 Verification}
+% ============================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{\texttt{rosolver} Symbolic Candidate Ranking on Multi-Stratum Human Cardiovascular Data ($n = 24$)}
+\label{tab:bic}
+\renewcommand{\arraystretch}{1.22}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}clrrrX@{}}
+\toprule
+\textbf{Rank} & \textbf{Candidate} & \textbf{$R^2$} & \textbf{RMSE [yr]} & \textbf{BIC} & \textbf{Calibrated Symbolic Structure} \\
+\midrule
+\textbf{\#1} & \texttt{buckingham\_pi\_power} & $\mathbf{0.9703}$ & $\mathbf{0.5438}$ & $\mathbf{48.406}$ & $\mathcal{L}_0 + |\kappa_{\mathcal{L}}| H^{\nu_1 - 1}(\Deff/v)^{\nu_1}$ ($\mathcal{L}_0=63.35$, $\nu_1=0.259$) \\
+\#2 & \texttt{buckingham\_pi\_affine} & $0.9695$ & $0.5507$ & $49.012$ & $\mathcal{L}_0 + N_1/H + \tau_{\mathrm{vasc}}(\Deff/v)$ \\
+\#3 & \texttt{leading\_dimensional} & $0.8716$ & $1.1307$ & $80.360$ & $\mathcal{L}_0 + N_1/H$ (ignores $v$ and $\Deff$) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{resultbox}{Verification, Conservation \& Clinical Validation Summary (\texttt{PASSED})}
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Time-Step Convergence (\texttt{timestep\_study}, $\Delta t \in \{0.1, 0.2, 0.4\}\text{ yr}$)}: Monotonic convergence with Celik/Roache observed order $\mathbf{p_{\mathrm{obs}} = 3.9821}$ (formal RK4 order $4.00$) and fine-step numerical uncertainty $\mathrm{GCI}_{\mathrm{fine}}^{21} = \mathbf{1.41 \times 10^{-10}\%}$ (\textbf{PASSED}).
+  \item \textbf{Symbolic \& Discrete Conservation (\texttt{audit\_ode\_invariants})}: Exact symbolic identity $\td{}{t}(S + M) = 0$ confirmed; maximum trajectory residual $\max_t |S(t) + M(t) - 1| = \mathbf{1.55 \times 10^{-15}}$ (\textbf{PASSED}).
+  \item \textbf{Jacobian Stiffness (\texttt{analyze\_stiffness})}: Non-stiff coupled aging spectrum (stiffness ratio $= 1.286$), confirming explicit RK4 stability over multi-decade steps.
+  \item \textbf{Clinical Cohort Validation (\texttt{ValidationStudy}, $k=2.0$)}: Coupled ODE predictions vs.\ 8 adult resting-HR cohort strata ($48\text{--}98\text{ bpm}$) achieve $\mathbf{\mathrm{RMSE} = 0.386\text{ yr}}$, $\max |E|/u_{\mathrm{val}} = 1.152 \le 2.0$, with $\mathbf{100\%}$ of strata inside combined uncertainty bands (\textbf{PASSED}).
+\end{itemize}
+\end{resultbox}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{../../figures/cardio_fig4_verification_calibration.png}
+  \caption{Four-pillar \texttt{rosolver} verification and validation summary: (a)~4th-order RK4 discretization convergence, (b)~machine-precision survival probability conservation $|S(t)+M(t)-1|$, (c)~BIC candidate ranking demonstrating a $31.95$-point advantage for hemodynamic $\Pi_{\St}$ coupling over $H$-only scaling, and (d)~clinical parity validation.}
+  \label{fig:vv}
+\end{figure}
+
+% ============================================================================
+\section{Synthesis: Concise Reference Equations}
+% ============================================================================
+
+Depending on observational fidelity, human average lifespan $\Lbar$ is expressed as a function of heart rate $H$ at three nested levels of mathematical completeness:
+\begin{enumerate}[leftmargin=1.5em,itemsep=4pt]
+  \item \textbf{Dimensionally Coupled Algebraic Law (Buckingham-$\Pi$ Strouhal Form)}:
+  \begin{equation}
+    \Lbar(H, v, \Deff) = \mathcal{L}_0 + \frac{N_1}{H}\left(\frac{H\,\Deff}{v}\right)^{\nu_1},
+    \qquad \Deff(t) = \left(\sum_{k=1}^m w_k D_k(t)^q\right)^{1/q}, \quad 0 < \nu_1 < 1.
+  \end{equation}
+  \item \textbf{Closed-Form Analytical Gompertz--Cox Law (Stationary Heart-Rate Predictor)}:
+  \begin{equation}
+    \Lbar(H) = a_{\mathrm{adult}} + \frac{\exp[z(H)]}{\gamma_G}\,E_1\bigl(z(H)\bigr) \;\simeq\; \Lbar_{\mathrm{ref}} - \frac{\beta_H}{\gamma_G}(H - H_{\mathrm{ref}}),
+    \qquad z(H) = \frac{\alpha_G}{\gamma_G}e^{\beta_H(H - H_{\mathrm{ref}})}.
+  \end{equation}
+  \item \textbf{Exact Non-Stationary Trajectory Functional ($a(t), v(t), \{D_k(t)\}$ Time-Varying)}:
+  \begin{equation}
+  \begin{aligned}
+    \Lbar[H] &= a_{\mathrm{adult}} + \int_0^\infty \exp\!\left(-\int_0^t \lambda(\tau)\,\dd\tau\right)\dd t,\\
+    \lambda(\tau) &= \bigl(\lambda_{\mathrm{ext}} + \alpha_G e^{\gamma_G(a(\tau)-a_{\mathrm{adult}})}\bigr)\exp\!\Bigl[\beta_H\bigl(f(a(\tau), v(\tau), \Deff(\tau)) - H_{\mathrm{ref}}\bigr)\Bigr].
+  \end{aligned}
+  \end{equation}
+\end{enumerate}
+
+\vspace{0.6em}
+\noindent\emph{Scope Note}: Verification and validation diagnostics follow ASME V\&V~20-2009, Roache~(1998), and Celik et~al.~(2008) engineering traceability practices and do not constitute formal clinical or regulatory certification.
+
+\begin{thebibliography}{9}
+\bibitem{levine1997}
+H.~J. Levine.
+\newblock Rest heart rate and life expectancy.
+\newblock {\em Journal of the American College of Cardiology}, 30(4):1104--1106, 1997.
+
+\bibitem{wbe1997}
+G.~B. West, J.~H. Brown, and B.~J. Enquist.
+\newblock A general model for the origin of allometric scaling laws in biology.
+\newblock {\em Science}, 276(5309):122--126, 1997.
+
+\bibitem{jensen2013}
+M.~T. Jensen, P.~Suadicani, H.~O. Hein, and F.~Gyntelberg.
+\newblock Elevated resting heart rate, physical fitness and all-cause mortality: a 16-year follow-up in the Copenhagen Male Study.
+\newblock {\em Heart}, 99(12):882--887, 2013.
+
+\bibitem{jouven2005}
+X.~Jouven, J.-P. Empana, P.~J. Schwartz, M.~Desnos, D.~Courbon, and P.~Ducimeti\`ere.
+\newblock Heart-rate profile during exercise as a predictor of sudden death.
+\newblock {\em New England Journal of Medicine}, 352(19):1951--1958, 2005.
+
+\bibitem{zhang2016}
+D.~Zhang, X.~Shen, and X.~Qi.
+\newblock Resting heart rate and all-cause and cardiovascular mortality in the general population: a meta-analysis.
+\newblock {\em CMAJ}, 188(3):E53--E63, 2016.
+
+\bibitem{murray1926}
+C.~D. Murray.
+\newblock The physiological principle of minimum work: I. The vascular system and the cost of blood volume.
+\newblock {\em Proceedings of the National Academy of Sciences}, 12(3):207--214, 1926.
+
+\bibitem{celik2008}
+I.~B. Celik, U.~Ghia, P.~J. Roache, C.~J. Freitas, H.~Coleman, and P.~E. Raad.
+\newblock Procedure for estimation and reporting of uncertainty due to discretization in CFD applications.
+\newblock {\em ASME Journal of Fluids Engineering}, 130(7):078001, 2008.
+\end{thebibliography}
+
+\end{document}
